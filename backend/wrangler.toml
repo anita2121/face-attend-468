@@ -1,0 +1,8 @@
+name = "polished-mountain-3c79"
+main = "src/index.js"
+compatibility_date = "2026-11-12"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "face-attendance-db"
+database_id = "98609002-3afc-4cd7-97a0-9506fac27bc5"
