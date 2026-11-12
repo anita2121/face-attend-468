@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem Presensi Wajah 468 Titik (MediaPipe + IndexedDB)</title>
+    <title>Sistem Presensi Wajah 468 Titik (MediaPipe + Cloudflare D1)</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Font: Inter -->
@@ -72,7 +72,7 @@
                 <div>
                     <div class="flex items-center gap-2">
                         <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">FaceAttend 468</h1>
-                        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">IndexedDB</span>
+                        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">Cloudflare D1</span>
                     </div>
                     <p class="text-xs text-slate-400">Presensi Biometrik 468 Titik Landmark Wajah</p>
                 </div>
@@ -251,7 +251,7 @@
                     <div class="flex items-center justify-between mb-3">
                         <div>
                             <h2 class="text-base font-bold text-white">Registrasi Wajah Baru</h2>
-                            <p class="text-xs text-slate-400">Simpan vektor 468 titik ke IndexedDB</p>
+                            <p class="text-xs text-slate-400">Simpan vektor fitur wajah ke database</p>
                         </div>
                         <span class="text-xs font-mono px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-400">
                             468-D Vector
@@ -292,8 +292,8 @@
         <section id="tab-users" class="tab-content hidden space-y-5">
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
-                    <h2 class="text-lg font-bold text-white">Database Wajah Terdaftar (IndexedDB)</h2>
-                    <p class="text-xs text-slate-400">Data biometrik 468 titik wajah tersimpan secara lokal di browser Anda.</p>
+                    <h2 class="text-lg font-bold text-white">Database Wajah Terdaftar (Cloudflare D1)</h2>
+                    <p class="text-xs text-slate-400">Data pengguna diambil dari database server.</p>
                 </div>
                 <div class="flex items-center gap-3 w-full sm:w-auto">
                     <input id="searchUserInput" type="text" placeholder="Cari nama atau NIK..." class="w-full sm:w-64 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
@@ -311,7 +311,7 @@
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
                 </div>
                 <h3 class="text-sm font-semibold text-white mb-1">Belum Ada Pengguna Terdaftar</h3>
-                <p class="text-xs text-slate-400 max-w-md mx-auto">Buka tab "Kamera & Registrasi" untuk mendaftarkan wajah pengguna pertama Anda ke dalam IndexedDB.</p>
+                <p class="text-xs text-slate-400 max-w-md mx-auto">Buka tab "Kamera & Registrasi" untuk mendaftarkan wajah pengguna pertama Anda ke dalam database.</p>
             </div>
         </section>
 
@@ -396,85 +396,90 @@
 
     <!-- Footer -->
     <footer class="w-full border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-500">
-        MediaPipe Face Mesh (468 Landmark Murni) • Penyimpanan Lokal IndexedDB (<code class="text-slate-400">FaceAttendanceDB</code>) • 100% Client-Side
+        MediaPipe Face Mesh (468 Landmark Murni) • Cloudflare Workers + D1
     </footer>
 
     <script>
         /**
          * ============================================================================
-         * 1. LAYER DATABASE LOKAL (IndexedDB: FaceAttendanceDB)
+         * 1. LAYER DATABASE CLOUDFARE WORKERS + D1
          * ============================================================================
          */
-      const API_URL = "https://polished-mountain-3c79.anitarednosari001.workers.dev";
+        const API_URL = 'https://polished-mountain-3c79.anitarednosari001.workers.dev';
 
-async function apiRequest(path, options = {}) {
-    const response = await fetch(API_URL + path, {
-        ...options,
-        headers: {
-            "Content-Type": "application/json",
-            ...options.headers
+        async function apiRequest(path, options = {}) {
+            const response = await fetch(`${API_URL}${path}`, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(options.headers || {})
+                }
+            });
+
+            let result;
+            try {
+                result = await response.json();
+            } catch {
+                throw new Error(`Server mengirim respons tidak valid (HTTP ${response.status})`);
+            }
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.message || `Permintaan gagal (HTTP ${response.status})`);
+            }
+            return result;
         }
-    });
 
-    const result = await response.json();
+        async function initDB() {
+            await apiRequest('/api/health');
+        }
 
-    if (!response.ok || !result.success) {
-        throw new Error(result.message || "Permintaan API gagal");
-    }
+        async function dbGetAll(storeName) {
+            const endpoints = {
+                users: '/api/users',
+                attendance_logs: '/api/attendance'
+            };
+            const endpoint = endpoints[storeName];
+            if (!endpoint) throw new Error(`Tabel tidak dikenal: ${storeName}`);
 
-    return result;
-}
+            const result = await apiRequest(endpoint);
+            return Array.isArray(result.data) ? result.data : [];
+        }
 
-// Pengganti initDB()
-async function initDB() {
-    await apiRequest("/api/health");
-}
+        async function dbAdd(storeName, data) {
+            const endpoints = {
+                users: '/api/users',
+                attendance_logs: '/api/attendance'
+            };
+            const endpoint = endpoints[storeName];
+            if (!endpoint) throw new Error(`Tabel tidak dikenal: ${storeName}`);
 
-// Ambil semua data
-async function dbGetAll(storeName) {
-    const endpoint = storeName === "users"
-        ? "/api/users"
-        : "/api/attendance";
+            const result = await apiRequest(endpoint, {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+            return result.id;
+        }
 
-    const result = await apiRequest(endpoint);
-    return result.data || [];
-}
+        async function dbDelete(storeName, id) {
+            if (storeName !== 'users') {
+                throw new Error('Penghapusan hanya tersedia untuk data pengguna.');
+            }
+            await apiRequest(`/api/users/${encodeURIComponent(id)}`, {
+                method: 'DELETE'
+            });
+        }
 
-// Simpan data baru
-async function dbAdd(storeName, data) {
-    const endpoint = storeName === "users"
-        ? "/api/users"
-        : "/api/attendance";
+        async function dbClear(storeName) {
+            if (storeName !== 'attendance_logs') {
+                throw new Error('Reset tabel pengguna tidak tersedia melalui fungsi ini.');
+            }
+            await apiRequest('/api/attendance', { method: 'DELETE' });
+        }
 
-    const result = await apiRequest(endpoint, {
-        method: "POST",
-        body: JSON.stringify(data)
-    });
+        async function dbResetAll() {
+            await apiRequest('/api/database/reset', { method: 'DELETE' });
+        }
 
-    return result.id;
-}
-
-// Hapus data berdasarkan ID
-async function dbDelete(storeName, id) {
-    if (storeName !== "users") {
-        throw new Error("Jenis data tidak didukung");
-    }
-
-    await apiRequest("/api/users/" + encodeURIComponent(id), {
-        method: "DELETE"
-    });
-}
-
-// Hapus seluruh riwayat presensi
-async function dbClear(storeName) {
-    if (storeName !== "attendance_logs") {
-        throw new Error("Reset seluruh pengguna belum diaktifkan");
-    }
-
-    await apiRequest("/api/attendance", {
-        method: "DELETE"
-    });
-}
         /**
          * ============================================================================
          * 2. EKSTRAKSI FITUR GEOMETRI 468 TITIK
@@ -680,6 +685,7 @@ async function dbClear(storeName) {
 
         // Proses Pencatatan Presensi ke IndexedDB
         async function recordAttendance(isAuto = false) {
+            if (recordAttendance.inFlight) return;
             if (!appState.currentLandmarks) {
                 if (!isAuto) showToast('Wajah Tidak Terdeteksi', 'Arahkan wajah Anda ke depan kamera terlebih dahulu.', 'error');
                 return;
@@ -726,6 +732,7 @@ async function dbClear(storeName) {
             };
 
             try {
+                recordAttendance.inFlight = true;
                 await dbAdd('attendance_logs', logEntry);
                 playBeep('success');
                 showToast(
@@ -739,7 +746,7 @@ async function dbClear(storeName) {
                 await refreshAllData();
             } catch (err) {
                 console.error('Gagal menyimpan log presensi:', err);
-                showToast('Gagal Menyimpan', 'Terjadi kesalahan saat menulis ke IndexedDB.', 'error');
+                showToast('Gagal Menyimpan', 'Terjadi kesalahan saat menulis ke database server.', 'error');
             }
         }
 
@@ -947,7 +954,7 @@ async function dbClear(storeName) {
                 card.querySelector(`[data-delete-user="${user.id}"]`).onclick = async () => {
                     const ok = await showConfirmModal(
                         'Hapus Pengguna?',
-                        `Data wajah "${user.name}" (${user.nik}) akan dihapus permanen dari IndexedDB.`
+                        `Data wajah "${user.name}" (${user.nik}) akan dihapus permanen dari database.`
                     );
                     if (ok) {
                         await dbDelete('users', user.id);
@@ -1156,13 +1163,13 @@ async function dbClear(storeName) {
                     });
 
                     playBeep('success');
-                    showToast('Registrasi Berhasil', `Wajah ${name} (${nik}) berhasil disimpan ke IndexedDB.`, 'success');
+                    showToast('Registrasi Berhasil', `Wajah ${name} (${nik}) berhasil disimpan ke database server.`, 'success');
                     e.target.reset();
                     await refreshAllData();
                 } catch (err) {
                     console.error('Gagal menyimpan pengguna:', err);
                     playBeep('error');
-                    showToast('Gagal Registrasi', 'Terjadi kesalahan saat menyimpan data wajah ke IndexedDB.', 'error');
+                    showToast('Gagal Registrasi', 'Terjadi kesalahan saat menyimpan data wajah ke database server.', 'error');
                 }
             });
 
@@ -1179,7 +1186,7 @@ async function dbClear(storeName) {
             document.getElementById('resetLogsBtn').addEventListener('click', async () => {
                 const ok = await showConfirmModal(
                     'Reset Semua Riwayat Presensi?',
-                    'Seluruh log kehadiran di IndexedDB akan dihapus permanen. Data pengguna tetap aman.'
+                    'Seluruh log kehadiran di database akan dihapus permanen. Data pengguna tetap aman.'
                 );
                 if (ok) {
                     await dbClear('attendance_logs');
@@ -1191,11 +1198,10 @@ async function dbClear(storeName) {
             document.getElementById('resetAllDbBtn').addEventListener('click', async () => {
                 const ok = await showConfirmModal(
                     'Reset Seluruh Database?',
-                    'Semua data pengguna terdaftar dan riwayat presensi di IndexedDB akan dihapus permanen.'
+                    'Semua data pengguna terdaftar dan riwayat presensi di database akan dihapus permanen.'
                 );
                 if (ok) {
-                    await dbClear('users');
-                    await dbClear('attendance_logs');
+                    await dbResetAll();
                     appState.lastAutoAttendMap = {};
                     showToast('Database Direset', 'Seluruh data pengguna dan log presensi telah dihapus.', 'info');
                     await refreshAllData();
@@ -1262,7 +1268,7 @@ async function dbClear(storeName) {
                 await initDB();
                 await refreshAllData();
             } catch (err) {
-                showToast('Error Database', 'Browser Anda tidak mendukung IndexedDB.', 'error');
+                showToast('Koneksi Backend Gagal', err.message || 'Tidak dapat terhubung ke Cloudflare Worker/D1.', 'error');
             }
             await startFaceMeshCamera();
         };
