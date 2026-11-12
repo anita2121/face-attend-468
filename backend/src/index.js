@@ -1,145 +1,53 @@
 
 const ALLOWED_ORIGINS = [
   "https://anita2121.github.io"
-]; 
+];
 
-const JSON_HEADERS = {
-  "Content-Type": "application/json; charset=utf-8"
-};
-
-const MAX_BODY_SIZE = 3 * 1024 * 1024;
-const EMBEDDING_LENGTH = 1404;
-
-// =====================================================
-// CORS
-// =====================================================
-
-function getCorsHeaders(request) {
+function corsHeaders(request) {
   const origin = request.headers.get("Origin");
   const headers = new Headers();
 
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  if (ALLOWED_ORIGINS.includes(origin)) {
     headers.set("Access-Control-Allow-Origin", origin);
   }
 
-  headers.set(
-    "Access-Control-Allow-Methods",
-    "GET, POST, DELETE, OPTIONS"
-  );
-
-  headers.set(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization"
-  );
-
+  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   headers.set("Access-Control-Max-Age", "86400");
   headers.set("Vary", "Origin");
 
   return headers;
 }
 
-function addCors(response, request) {
-  const headers = new Headers(response.headers);
-  const cors = getCorsHeaders(request);
+function json(data, status = 200, request) {
+  const headers = corsHeaders(request);
+  headers.set("Content-Type", "application/json; charset=utf-8");
 
-  for (const [key, value] of cors.entries()) {
-    headers.set(key, value);
-  }
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
+  return new Response(JSON.stringify(data), {
+    status,
     headers
   });
 }
 
-// =====================================================
-// RESPONSE
-// =====================================================
-
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: JSON_HEADERS
-  });
-}
-
-function success(data = null, message = "Berhasil.") {
-  return json({
-    success: true,
-    message,
-    ...(data !== null ? { data } : {})
-  });
-}
-
-function error(message, status = 400, extra = {}) {
-  return json({
-    success: false,
-    message,
-    ...extra
-  }, status);
-}
-
-// =====================================================
-// HELPER
-// =====================================================
-
-async function readJson(request) {
-  const contentLength = Number(
-    request.headers.get("Content-Length") || 0
-  );
-
-  if (contentLength > MAX_BODY_SIZE) {
-    throw new Error("Ukuran data terlalu besar.");
-  }
-
-  const text = await request.text();
-
-  if (!text) {
-    throw new Error("Request body kosong.");
-  }
-
-  if (new TextEncoder().encode(text).length > MAX_BODY_SIZE) {
-    throw new Error("Ukuran data terlalu besar.");
-  }
+function parseUser(row) {
+  let embedding = [];
 
   try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Format JSON tidak valid.");
-  }
-}
+    embedding = JSON.parse(row.embedding);
+  } catch {}
 
-function parseEmbedding(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
-
-function mapUser(row) {
   return {
     id: row.id,
     name: row.name,
     nik: row.nik,
     division: row.division,
-    embedding: parseEmbedding(row.embedding),
-    photo: row.photo || null,
+    embedding,
+    photo: row.photo || "",
     createdAt: row.created_at
   };
 }
 
-function mapAttendance(row) {
+function parseAttendance(row) {
   return {
     id: row.id,
     userId: row.user_id,
@@ -151,185 +59,122 @@ function mapAttendance(row) {
     timestamp: row.timestamp,
     dateStr: row.date_str,
     timeStr: row.time_str,
-    photo: row.photo || null
+    photo: row.photo || ""
   };
+}
+
+async function readBody(request) {
+  const text = await request.text();
+
+  if (!text || text.length > 3000000) {
+    throw new Error("Request body kosong atau terlalu besar.");
+  }
+
+  return JSON.parse(text);
 }
 
 function jakartaDateTime() {
   const now = new Date();
 
-  const dateStr = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Jakarta",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(now);
-
-  const timeStr = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Jakarta",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  }).format(now);
-
   return {
     timestamp: now.toISOString(),
-    dateStr,
-    timeStr
+    dateStr: new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(now),
+    timeStr: new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Jakarta",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    }).format(now)
   };
 }
 
-function validText(value, maxLength = 255) {
-  return (
-    typeof value === "string" &&
-    value.trim().length > 0 &&
-    value.trim().length <= maxLength
-  );
-}
-
-function validEmbedding(embedding) {
-  return (
-    Array.isArray(embedding) &&
-    embedding.length === EMBEDDING_LENGTH &&
-    embedding.every(
-      value => typeof value === "number" && Number.isFinite(value)
-    )
-  );
-}
-
-// =====================================================
-// DATABASE CHECK
-// =====================================================
-
-async function checkDatabase(db) {
-  await db.prepare("SELECT id FROM users LIMIT 1").all();
-  await db.prepare("SELECT id FROM attendance_logs LIMIT 1").all();
-
-  return {
-    users: true,
-    attendance_logs: true
-  };
-}
-
-// =====================================================
-// ROUTES
-// =====================================================
-
-async function handleRequest(request, env) {
+async function handle(request, env) {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/\/+$/, "") || "/";
+  const path = url.pathname.replace(/\/+$/, "");
   const method = request.method.toUpperCase();
 
   if (!env.DB) {
-    return error(
-      "Database D1 belum terhubung. Periksa binding DB di Cloudflare.",
-      500
-    );
+    return json({
+      success: false,
+      message: "Binding D1 DB tidak ditemukan."
+    }, 500, request);
   }
 
   const db = env.DB;
 
-  // ---------------------------------------------------
-  // HEALTH CHECK
-  // ---------------------------------------------------
-
+  // HEALTH
   if (path === "/api/health" && method === "GET") {
-    try {
-      const tables = await checkDatabase(db);
+    const users = await db.prepare(
+      "SELECT COUNT(*) AS total FROM users"
+    ).first();
 
-      return success({
-        status: "online",
-        database: "connected",
-        tables
-      }, "FaceAttend 468 API aktif.");
-    } catch (err) {
-      console.error("Health check database error:", err);
+    const logs = await db.prepare(
+      "SELECT COUNT(*) AS total FROM attendance_logs"
+    ).first();
 
-      return error(
-        "Worker aktif, tetapi database belum siap.",
-        500,
-        {
-          database: "error",
-          debug: err.message
-        }
-      );
-    }
+    return json({
+      success: true,
+      message: "FaceAttend 468 API aktif",
+      database: "connected",
+      tables: {
+        users: true,
+        attendance_logs: true
+      },
+      totalUsers: users.total,
+      totalAttendance: logs.total
+    }, 200, request);
   }
 
-  // ---------------------------------------------------
   // GET USERS
-  // ---------------------------------------------------
-
   if (path === "/api/users" && method === "GET") {
-    const result = await db.prepare(`
-      SELECT
-        id,
-        name,
-        nik,
-        division,
-        embedding,
-        photo,
-        created_at
-      FROM users
-      ORDER BY id DESC
-    `).all();
+    const result = await db.prepare(
+      "SELECT * FROM users ORDER BY id DESC"
+    ).all();
 
-    const users = (result.results || []).map(mapUser);
-
-    return success(users, "Data pengguna berhasil dimuat.");
+    return json({
+      success: true,
+      data: result.results.map(parseUser)
+    }, 200, request);
   }
 
-  // ---------------------------------------------------
   // REGISTER USER
-  // ---------------------------------------------------
-
   if (path === "/api/users" && method === "POST") {
-    const body = await readJson(request);
+    const body = await readBody(request);
 
-    const name = body.name?.trim();
-    const nik = body.nik?.trim();
-    const division = body.division?.trim();
-    const embedding = parseEmbedding(body.embedding);
-    const photo = body.photo || null;
+    const name = String(body.name || "").trim();
+    const nik = String(body.nik || "").trim();
+    const division = String(body.division || "").trim();
+    const embedding = body.embedding;
+    const photo = body.photo || "";
 
-    if (!validText(name, 150)) {
-      return error("Nama wajib diisi dan maksimal 150 karakter.");
-    }
-
-    if (!validText(nik, 50)) {
-      return error("NIK wajib diisi dan maksimal 50 karakter.");
-    }
-
-    if (!validText(division, 150)) {
-      return error("Divisi wajib diisi dan maksimal 150 karakter.");
-    }
-
-    if (!validEmbedding(embedding)) {
-      return error(
-        "Data wajah tidak valid. Embedding harus berisi 1404 angka."
-      );
+    if (!name || !nik || !division) {
+      return json({
+        success: false,
+        message: "Nama, NIK, dan divisi wajib diisi."
+      }, 400, request);
     }
 
     if (
-      photo !== null &&
-      (typeof photo !== "string" || photo.length > 2 * 1024 * 1024)
+      !Array.isArray(embedding) ||
+      embedding.length !== 1404 ||
+      !embedding.every(Number.isFinite)
     ) {
-      return error("Foto tidak valid atau ukurannya terlalu besar.");
+      return json({
+        success: false,
+        message: "Embedding harus berisi 1404 angka valid."
+      }, 400, request);
     }
-
-    const createdAt = new Date().toISOString();
 
     try {
       const result = await db.prepare(`
-        INSERT INTO users (
-          name,
-          nik,
-          division,
-          embedding,
-          photo,
-          created_at
-        )
+        INSERT INTO users
+        (name, nik, division, embedding, photo, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).bind(
         name,
@@ -337,182 +182,119 @@ async function handleRequest(request, env) {
         division,
         JSON.stringify(embedding),
         photo,
-        createdAt
+        new Date().toISOString()
       ).run();
 
-      return success({
+      return json({
+        success: true,
+        message: "Registrasi berhasil disimpan ke D1.",
         id: result.meta.last_row_id
-      }, "Registrasi pengguna berhasil.");
-    } catch (err) {
-      console.error("Register user error:", err);
+      }, 201, request);
 
-      if (
-        err.message &&
-        err.message.toLowerCase().includes("unique")
-      ) {
-        return error("NIK sudah terdaftar.", 409);
+    } catch (error) {
+      if (String(error.message).toLowerCase().includes("unique")) {
+        return json({
+          success: false,
+          message: "NIK sudah terdaftar."
+        }, 409, request);
       }
 
-      throw err;
+      throw error;
     }
   }
 
-  // ---------------------------------------------------
   // DELETE USER
-  // ---------------------------------------------------
+  const deleteMatch = path.match(/^\/api\/users\/(\d+)$/);
 
-  const deleteUserMatch = path.match(/^\/api\/users\/(\d+)$/);
-
-  if (deleteUserMatch && method === "DELETE") {
-    const userId = Number(deleteUserMatch[1]);
-
-    const user = await db.prepare(`
-      SELECT id FROM users WHERE id = ?
-    `).bind(userId).first();
-
-    if (!user) {
-      return error("Pengguna tidak ditemukan.", 404);
-    }
+  if (deleteMatch && method === "DELETE") {
+    const id = Number(deleteMatch[1]);
 
     await db.batch([
-      db.prepare(`
-        DELETE FROM attendance_logs WHERE user_id = ?
-      `).bind(userId),
-
-      db.prepare(`
-        DELETE FROM users WHERE id = ?
-      `).bind(userId)
+      db.prepare(
+        "DELETE FROM attendance_logs WHERE user_id = ?"
+      ).bind(id),
+      db.prepare(
+        "DELETE FROM users WHERE id = ?"
+      ).bind(id)
     ]);
 
-    return success({
-      id: userId
-    }, "Pengguna dan riwayat absensinya berhasil dihapus.");
+    return json({
+      success: true,
+      message: "Pengguna berhasil dihapus."
+    }, 200, request);
   }
 
-  // ---------------------------------------------------
   // GET ATTENDANCE
-  // ---------------------------------------------------
-
   if (path === "/api/attendance" && method === "GET") {
-    const result = await db.prepare(`
-      SELECT
-        id,
-        user_id,
-        name,
-        nik,
-        division,
-        type,
-        similarity,
-        timestamp,
-        date_str,
-        time_str,
-        photo
-      FROM attendance_logs
-      ORDER BY timestamp DESC, id DESC
-    `).all();
+    const result = await db.prepare(
+      "SELECT * FROM attendance_logs ORDER BY timestamp DESC"
+    ).all();
 
-    const logs = (result.results || []).map(mapAttendance);
-
-    return success(logs, "Data absensi berhasil dimuat.");
+    return json({
+      success: true,
+      data: result.results.map(parseAttendance)
+    }, 200, request);
   }
 
-  // ---------------------------------------------------
-  // CREATE ATTENDANCE
-  // ---------------------------------------------------
-
+  // POST ATTENDANCE
   if (path === "/api/attendance" && method === "POST") {
-    const body = await readJson(request);
+    const body = await readBody(request);
 
     const userId = Number(body.userId);
     const type = String(body.type || "").toUpperCase();
     const similarity = Number(body.similarity);
 
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return error("ID pengguna tidak valid.");
-    }
-
-    if (!["MASUK", "PULANG"].includes(type)) {
-      return error("Jenis absensi harus MASUK atau PULANG.");
-    }
-
     if (
+      !Number.isInteger(userId) ||
+      userId <= 0 ||
+      !["MASUK", "PULANG"].includes(type) ||
       !Number.isFinite(similarity) ||
       similarity < 0 ||
       similarity > 100
     ) {
-      return error("Nilai similarity tidak valid.");
+      return json({
+        success: false,
+        message: "Data presensi tidak valid."
+      }, 400, request);
     }
 
-    const user = await db.prepare(`
-      SELECT id, name, nik, division
-      FROM users
-      WHERE id = ?
-    `).bind(userId).first();
+    const user = await db.prepare(
+      "SELECT * FROM users WHERE id = ?"
+    ).bind(userId).first();
 
     if (!user) {
-      return error("Pengguna tidak ditemukan.", 404);
+      return json({
+        success: false,
+        message: "Pengguna tidak ditemukan."
+      }, 404, request);
     }
 
-    const current = jakartaDateTime();
+    const date = jakartaDateTime();
 
-    const timestamp =
-      typeof body.timestamp === "string" && body.timestamp.length <= 100
-        ? body.timestamp
-        : current.timestamp;
+    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(body.dateStr || "")
+      ? body.dateStr
+      : date.dateStr;
 
-    const dateStr =
-      typeof body.dateStr === "string" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(body.dateStr)
-        ? body.dateStr
-        : current.dateStr;
+    const timeStr = /^\d{2}:\d{2}(:\d{2})?$/.test(body.timeStr || "")
+      ? body.timeStr
+      : date.timeStr;
 
-    const timeStr =
-      typeof body.timeStr === "string" &&
-      /^\d{2}:\d{2}(:\d{2})?$/.test(body.timeStr)
-        ? body.timeStr
-        : current.timeStr;
-
-    const photo = body.photo || null;
-
-    if (
-      photo !== null &&
-      (typeof photo !== "string" || photo.length > 2 * 1024 * 1024)
-    ) {
-      return error("Foto absensi tidak valid atau terlalu besar.");
-    }
-
-    // Cegah absensi ganda untuk jenis dan tanggal yang sama.
     const existing = await db.prepare(`
-      SELECT id
-      FROM attendance_logs
-      WHERE user_id = ?
-        AND type = ?
-        AND date_str = ?
-      LIMIT 1
+      SELECT id FROM attendance_logs
+      WHERE user_id = ? AND type = ? AND date_str = ?
     `).bind(userId, type, dateStr).first();
 
     if (existing) {
-      return error(
-        type === "MASUK"
-          ? "Absensi masuk hari ini sudah tercatat."
-          : "Absensi pulang hari ini sudah tercatat.",
-        409
-      );
+      return json({
+        success: false,
+        message: "Presensi jenis ini sudah tercatat hari ini."
+      }, 409, request);
     }
 
     const result = await db.prepare(`
-      INSERT INTO attendance_logs (
-        user_id,
-        name,
-        nik,
-        division,
-        type,
-        similarity,
-        timestamp,
-        date_str,
-        time_str,
-        photo
-      )
+      INSERT INTO attendance_logs
+      (user_id, name, nik, division, type, similarity,
+       timestamp, date_str, time_str, photo)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       user.id,
@@ -521,85 +303,70 @@ async function handleRequest(request, env) {
       user.division,
       type,
       similarity,
-      timestamp,
+      date.timestamp,
       dateStr,
       timeStr,
-      photo
+      body.photo || null
     ).run();
 
-    return success({
-      id: result.meta.last_row_id,
-      timeStr,
-      dateStr
-    }, "Absensi berhasil dicatat.");
+    return json({
+      success: true,
+      message: "Presensi berhasil disimpan.",
+      id: result.meta.last_row_id
+    }, 201, request);
   }
 
-  // ---------------------------------------------------
   // DELETE ALL ATTENDANCE
-  // ---------------------------------------------------
-
   if (path === "/api/attendance" && method === "DELETE") {
-    await db.prepare(`
-      DELETE FROM attendance_logs
-    `).run();
+    await db.prepare(
+      "DELETE FROM attendance_logs"
+    ).run();
 
-    return success(null, "Semua riwayat absensi berhasil dihapus.");
+    return json({
+      success: true,
+      message: "Riwayat presensi berhasil dihapus."
+    }, 200, request);
   }
 
-  // ---------------------------------------------------
   // RESET DATABASE
-  // ---------------------------------------------------
-
   if (path === "/api/database/reset" && method === "DELETE") {
     await db.batch([
       db.prepare("DELETE FROM attendance_logs"),
       db.prepare("DELETE FROM users")
     ]);
 
-    return success(
-      null,
-      "Database berhasil direset. Semua pengguna dan riwayat absensi telah dihapus."
-    );
+    return json({
+      success: true,
+      message: "Database berhasil direset."
+    }, 200, request);
   }
 
-  // ---------------------------------------------------
-  // NOT FOUND
-  // ---------------------------------------------------
-
-  return error("Endpoint tidak ditemukan.", 404);
+  return json({
+    success: false,
+    message: "Endpoint tidak ditemukan."
+  }, 404, request);
 }
-
-// =====================================================
-// MAIN WORKER
-// =====================================================
 
 export default {
   async fetch(request, env) {
-    // Preflight harus ditangani sebelum routing dan database.
+    // PREFLIGHT CORS
     if (request.method.toUpperCase() === "OPTIONS") {
       return new Response(null, {
         status: 204,
-        headers: getCorsHeaders(request)
+        headers: corsHeaders(request)
       });
     }
 
     try {
-      const response = await handleRequest(request, env);
-      return addCors(response, request);
-    } catch (err) {
-      console.error("Worker API error:", err);
+      return await handle(request, env);
+    } catch (error) {
+      console.error("FaceAttend Worker:", error);
 
-      const response = error(
-        "Terjadi kesalahan pada server.",
-        500,
-        {
-          debug: err instanceof Error
-            ? err.message
-            : String(err)
-        }
-      );
-
-      return addCors(response, request);
+      return json({
+        success: false,
+        message: "Terjadi kesalahan pada server.",
+        debug: error.message
+      }, 500, request);
     }
   }
 };
