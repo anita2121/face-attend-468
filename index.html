@@ -405,77 +405,76 @@
          * 1. LAYER DATABASE LOKAL (IndexedDB: FaceAttendanceDB)
          * ============================================================================
          */
-        const DB_NAME = 'FaceAttendanceDB';
-        const DB_VERSION = 1;
-        let dbInstance = null;
+      const API_URL = "https://polished-mountain-3c79.anitarednosari001.workers.dev";
 
-        function initDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-                request.onupgradeneeded = (event) => {
-                    const db = event.target.result;
-                    if (!db.objectStoreNames.contains('users')) {
-                        const userStore = db.createObjectStore('users', { keyPath: 'id', autoIncrement: true });
-                        userStore.createIndex('nik', 'nik', { unique: true });
-                    }
-                    if (!db.objectStoreNames.contains('attendance_logs')) {
-                        const logStore = db.createObjectStore('attendance_logs', { keyPath: 'id', autoIncrement: true });
-                        logStore.createIndex('dateStr', 'dateStr', { unique: false });
-                    }
-                };
-
-                request.onsuccess = (event) => {
-                    dbInstance = event.target.result;
-                    resolve(dbInstance);
-                };
-
-                request.onerror = (event) => {
-                    reject(event.target.error);
-                };
-            });
+async function apiRequest(path, options = {}) {
+    const response = await fetch(API_URL + path, {
+        ...options,
+        headers: {
+            "Content-Type": "application/json",
+            ...options.headers
         }
+    });
 
-        function dbGetAll(storeName) {
-            return new Promise((resolve, reject) => {
-                const tx = dbInstance.transaction(storeName, 'readonly');
-                const store = tx.objectStore(storeName);
-                const req = store.getAll();
-                req.onsuccess = () => resolve(req.result || []);
-                req.onerror = () => reject(req.error);
-            });
-        }
+    const result = await response.json();
 
-        function dbAdd(storeName, data) {
-            return new Promise((resolve, reject) => {
-                const tx = dbInstance.transaction(storeName, 'readwrite');
-                const store = tx.objectStore(storeName);
-                const req = store.add(data);
-                req.onsuccess = () => resolve(req.result);
-                req.onerror = () => reject(req.error);
-            });
-        }
+    if (!response.ok || !result.success) {
+        throw new Error(result.message || "Permintaan API gagal");
+    }
 
-        function dbDelete(storeName, id) {
-            return new Promise((resolve, reject) => {
-                const tx = dbInstance.transaction(storeName, 'readwrite');
-                const store = tx.objectStore(storeName);
-                const req = store.delete(id);
-                req.onsuccess = () => resolve();
-                req.onerror = () => reject(req.error);
-            });
-        }
+    return result;
+}
 
-        function dbClear(storeName) {
-            return new Promise((resolve, reject) => {
-                const tx = dbInstance.transaction(storeName, 'readwrite');
-                const store = tx.objectStore(storeName);
-                const req = store.clear();
-                req.onsuccess = () => resolve();
-                req.onerror = () => reject(req.error);
-            });
-        }
+// Pengganti initDB()
+async function initDB() {
+    await apiRequest("/api/health");
+}
 
+// Ambil semua data
+async function dbGetAll(storeName) {
+    const endpoint = storeName === "users"
+        ? "/api/users"
+        : "/api/attendance";
+
+    const result = await apiRequest(endpoint);
+    return result.data || [];
+}
+
+// Simpan data baru
+async function dbAdd(storeName, data) {
+    const endpoint = storeName === "users"
+        ? "/api/users"
+        : "/api/attendance";
+
+    const result = await apiRequest(endpoint, {
+        method: "POST",
+        body: JSON.stringify(data)
+    });
+
+    return result.id;
+}
+
+// Hapus data berdasarkan ID
+async function dbDelete(storeName, id) {
+    if (storeName !== "users") {
+        throw new Error("Jenis data tidak didukung");
+    }
+
+    await apiRequest("/api/users/" + encodeURIComponent(id), {
+        method: "DELETE"
+    });
+}
+
+// Hapus seluruh riwayat presensi
+async function dbClear(storeName) {
+    if (storeName !== "attendance_logs") {
+        throw new Error("Reset seluruh pengguna belum diaktifkan");
+    }
+
+    await apiRequest("/api/attendance", {
+        method: "DELETE"
+    });
+}
         /**
          * ============================================================================
          * 2. EKSTRAKSI FITUR GEOMETRI 468 TITIK
