@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Presensi Wajah 468 Titik (MediaPipe + IndexedDB)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Font: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- MediaPipe Face Mesh & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        input[type="range"] {
+            accent-color: #10b981;
+        }
+        /* Custom Scrollbar untuk tabel */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-emerald-500 selection:text-white">
+
+    <!-- Toast Notification Container (Pengganti alert) -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+    <!-- Custom Modal Konfirmasi (Pengganti confirm) -->
+    <div id="confirmModal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <h3 id="confirmTitle" class="text-lg font-bold text-white mb-2">Konfirmasi Tindakan</h3>
+            <p id="confirmMessage" class="text-sm text-slate-400 mb-6">Apakah Anda yakin ingin melanjutkan?</p>
+            <div class="flex justify-end gap-3">
+                <button id="confirmCancelBtn" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer">
+                    Batal
+                </button>
+                <button id="confirmOkBtn" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer">
+                    Ya, Lanjutkan
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Navigation Bar -->
+    <header class="w-full border-b border-slate-800/90 bg-slate-900/70 backdrop-blur-md sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row items-center justify-between gap-4">
+            <!-- Brand -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                        <circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/>
+                        <path d="M9.5 15a3.5 3.5 0 0 0 5 0"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">FaceAttend 468</h1>
+                        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">IndexedDB</span>
+                    </div>
+                    <p class="text-xs text-slate-400">Presensi Biometrik 468 Titik Landmark Wajah</p>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <nav class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 w-full md:w-auto justify-between md:justify-start">
+                <button data-tab="camera" class="tab-btn active flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 bg-emerald-600 text-white shadow cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    <span>Kamera & Registrasi</span>
+                </button>
+                <button data-tab="users" class="tab-btn flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 text-slate-400 hover:text-white cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Pengguna (<span id="navUserCount">0</span>)</span>
+                </button>
+                <button data-tab="logs" class="tab-btn flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 text-slate-400 hover:text-white cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <span>Riwayat (<span id="navLogCount">0</span>)</span>
+                </button>
+            </nav>
+
+            <!-- Live Clock -->
+            <div class="hidden lg:flex flex-col items-end">
+                <span id="liveTime" class="text-sm font-mono font-bold text-emerald-400">00:00:00</span>
+                <span id="liveDate" class="text-[11px] text-slate-400">-</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex-grow">
+
+        <!-- ========================================== -->
+        <!-- TAB 1: KAMERA PRESENSI & REGISTRASI WAJAH  -->
+        <!-- ========================================== -->
+        <section id="tab-camera" class="tab-content grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            <!-- Kolom Kiri: Viewport Kamera 468 Titik (7 kolom) -->
+            <div class="lg:col-span-7 flex flex-col gap-4">
+                <div id="canvasContainer" class="relative w-full aspect-[4/3] bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+                    <video id="inputVideo" class="hidden" autoplay playsinline></video>
+                    <canvas id="outputCanvas" class="w-full h-full object-contain block"></canvas>
+
+                    <!-- Overlay Loading / Kamera Error -->
+                    <div id="cameraOverlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center transition-opacity duration-300 z-10">
+                        <div id="cameraSpinner" class="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+                        <h3 id="overlayTitle" class="text-base font-semibold text-white mb-1">Mengaktifkan Kamera & Model 468 Titik...</h3>
+                        <p id="overlayDesc" class="text-xs text-slate-400 max-w-sm">Izinkan akses webcam di browser Anda untuk mulai memindai geometri wajah.</p>
+                        <button id="retryCameraBtn" class="hidden mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl transition cursor-pointer">
+                            Coba Hubungkan Kamera
+                        </button>
+                    </div>
+
+                    <!-- Top HUD Badges -->
+                    <div class="absolute top-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+                        <div class="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2">
+                            <span id="faceStatusDot" class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span id="faceStatusText" class="font-medium text-slate-200">Mencari Wajah...</span>
+                        </div>
+
+                        <div class="bg-slate-950/80 backdrop-blur-md border border-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-mono text-emerald-400">
+                            <span id="landmarkCount">0</span>/468 Titik
+                        </div>
+                    </div>
+
+                    <!-- Bottom Live Recognition Banner -->
+                    <div id="recognitionBanner" class="absolute bottom-3 left-3 right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3 transition-all">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <div id="matchAvatar" class="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 font-bold text-sm shrink-0 overflow-hidden">
+                                ?
+                            </div>
+                            <div class="min-w-0">
+                                <p id="matchName" class="text-sm font-bold text-white truncate">Belum Ada Wajah Dikenali</p>
+                                <p id="matchMeta" class="text-xs text-slate-400 truncate">Arahkan wajah ke kamera untuk pencocokan</p>
+                            </div>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <span class="text-[10px] uppercase tracking-wider text-slate-500 block">Kemiripan</span>
+                            <span id="matchScore" class="text-sm font-mono font-bold text-slate-400">0.0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bar Pengaturan Visual & Biometrik Cepat -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-center">
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-400">Ambang Kemiripan</span>
+                            <span id="thresholdVal" class="font-mono font-bold text-emerald-400">92%</span>
+                        </div>
+                        <input id="thresholdSlider" type="range" min="80" max="99" step="1" value="92" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+                    </div>
+
+                    <div class="sm:border-l border-slate-800 sm:pl-4">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-400">Ukuran Titik</span>
+                            <span id="dotSizeVal" class="font-mono font-bold text-emerald-400">1.8 px</span>
+                        </div>
+                        <input id="dotSizeSlider" type="range" min="1" max="5" step="0.2" value="1.8" class="w-full h-1.5 bg-slate-800 rounded-lg cursor-pointer">
+                    </div>
+
+                    <div class="flex items-center justify-between gap-2 sm:border-l border-slate-800 pt-3 sm:pt-0 sm:pl-4">
+                        <div>
+                            <p class="text-xs font-medium text-slate-200">Warna & Titik</p>
+                            <p class="text-[10px] text-slate-500">468 titik murni</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input id="dotColorPicker" type="color" value="#10b981" title="Pilih Warna Titik" class="w-7 h-7 rounded-lg bg-transparent border-0 cursor-pointer">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input id="showDotsToggle" type="checkbox" checked class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-2 border-t lg:border-t-0 lg:border-l border-slate-800 pt-3 lg:pt-0 lg:pl-4">
+                        <div>
+                            <p class="text-xs font-medium text-slate-200">Video Kamera</p>
+                            <p class="text-[10px] text-slate-500">Matikan = latar gelap</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input id="showVideoToggle" type="checkbox" checked class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kolom Kanan: Panel Aksi Presensi & Pendaftaran Wajah (5 kolom) -->
+            <div class="lg:col-span-5 flex flex-col gap-5">
+                
+                <!-- Card 1: Panel Presensi (Masuk / Pulang) -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="text-base font-bold text-white">Terminal Presensi</h2>
+                            <p class="text-xs text-slate-400">Pilih status atau aktifkan auto-presensi</p>
+                        </div>
+                        <!-- Toggle Auto Presensi -->
+                        <div class="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl">
+                            <span class="text-[11px] font-medium text-slate-300">Auto-Scan</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input id="autoAttendanceToggle" type="checkbox" class="sr-only peer">
+                                <div class="w-9 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Pilihan Tipe Presensi -->
+                    <div class="grid grid-cols-2 gap-2.5 mb-4">
+                        <button type="button" data-type="MASUK" class="attendance-type-btn active py-2.5 px-3 rounded-xl border border-emerald-500 bg-emerald-500/15 text-emerald-400 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                            ABSEN MASUK
+                        </button>
+                        <button type="button" data-type="PULANG" class="attendance-type-btn py-2.5 px-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-400 hover:text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer">
+                            <span class="w-2 h-2 rounded-full bg-sky-400"></span>
+                            ABSEN PULANG
+                        </button>
+                    </div>
+
+                    <!-- Tombol Catat Presensi Manual -->
+                    <button id="manualAttendBtn" type="button" class="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm shadow-lg shadow-emerald-950/50 transition flex items-center justify-center gap-2 cursor-pointer">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span>Catat Presensi Sekarang</span>
+                    </button>
+
+                    <!-- Informasi Presensi Terakhir -->
+                    <div id="lastAttendanceBox" class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                        <span class="text-slate-500">Presensi terakhir:</span>
+                        <span id="lastAttendanceText" class="text-slate-300 font-medium">Belum ada data hari ini</span>
+                    </div>
+                </div>
+
+                <!-- Card 2: Form Pendaftaran Wajah Baru (Registrasi) -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <h2 class="text-base font-bold text-white">Registrasi Wajah Baru</h2>
+                            <p class="text-xs text-slate-400">Simpan vektor 468 titik ke IndexedDB</p>
+                        </div>
+                        <span class="text-xs font-mono px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-400">
+                            468-D Vector
+                        </span>
+                    </div>
+
+                    <form id="registerForm" class="space-y-3">
+                        <div>
+                            <label for="regName" class="block text-xs font-medium text-slate-300 mb-1">Nama Lengkap <span class="text-rose-500">*</span></label>
+                            <input id="regName" type="text" required placeholder="Contoh: Budi Santoso" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition">
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label for="regNik" class="block text-xs font-medium text-slate-300 mb-1">NIK / NIP / ID <span class="text-rose-500">*</span></label>
+                                <input id="regNik" type="text" required placeholder="Contoh: EMP-001" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition">
+                            </div>
+                            <div>
+                                <label for="regDivision" class="block text-xs font-medium text-slate-300 mb-1">Jabatan / Divisi <span class="text-rose-500">*</span></label>
+                                <input id="regDivision" type="text" required placeholder="Contoh: IT & Sistem" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition">
+                            </div>
+                        </div>
+
+                        <div class="pt-1">
+                            <button id="registerBtn" type="submit" class="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-semibold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                                <span>Rekam Wajah & Simpan Pengguna</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- TAB 2: DAFTAR PENGGUNA TERDAFTAR           -->
+        <!-- ========================================== -->
+        <section id="tab-users" class="tab-content hidden space-y-5">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-white">Database Wajah Terdaftar (IndexedDB)</h2>
+                    <p class="text-xs text-slate-400">Data biometrik 468 titik wajah tersimpan secara lokal di browser Anda.</p>
+                </div>
+                <div class="flex items-center gap-3 w-full sm:w-auto">
+                    <input id="searchUserInput" type="text" placeholder="Cari nama atau NIK..." class="w-full sm:w-64 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+                </div>
+            </div>
+
+            <!-- Grid Kartu Pengguna -->
+            <div id="usersGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <!-- Diisi secara dinamis melalui JavaScript -->
+            </div>
+
+            <!-- Empty State Users -->
+            <div id="emptyUsersState" class="hidden bg-slate-900/50 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
+                <div class="w-12 h-12 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                </div>
+                <h3 class="text-sm font-semibold text-white mb-1">Belum Ada Pengguna Terdaftar</h3>
+                <p class="text-xs text-slate-400 max-w-md mx-auto">Buka tab "Kamera & Registrasi" untuk mendaftarkan wajah pengguna pertama Anda ke dalam IndexedDB.</p>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- TAB 3: RIWAYAT LOG PRESENSI & STATISTIK    -->
+        <!-- ========================================== -->
+        <section id="tab-logs" class="tab-content hidden space-y-5">
+            
+            <!-- Ringkasan Statistik Hari Ini -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span class="text-xs text-slate-400">Total Karyawan Terdaftar</span>
+                    <p id="statTotalUsers" class="text-2xl font-bold text-white mt-1">0</p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span class="text-xs text-slate-400">Absen Masuk (Hari Ini)</span>
+                    <p id="statTodayIn" class="text-2xl font-bold text-emerald-400 mt-1">0</p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span class="text-xs text-slate-400">Absen Pulang (Hari Ini)</span>
+                    <p id="statTodayOut" class="text-2xl font-bold text-sky-400 mt-1">0</p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span class="text-xs text-slate-400">Total Seluruh Log</span>
+                    <p id="statTotalLogs" class="text-2xl font-bold text-slate-200 mt-1">0</p>
+                </div>
+            </div>
+
+            <!-- Toolbar Filter & Export -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div>
+                        <label for="filterDateInput" class="sr-only">Filter Tanggal</label>
+                        <input id="filterDateInput" type="date" class="px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <button id="clearDateFilterBtn" type="button" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 transition cursor-pointer">
+                        Semua Tanggal
+                    </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <button id="exportCsvBtn" type="button" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition cursor-pointer">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <span>Export CSV</span>
+                    </button>
+                    <button id="resetLogsBtn" type="button" class="px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-semibold flex items-center gap-2 transition cursor-pointer">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        <span>Reset Log</span>
+                    </button>
+                    <button id="resetAllDbBtn" type="button" class="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-2 transition cursor-pointer">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                        <span>Reset Database</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tabel Riwayat Presensi -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-800 bg-slate-950/60 text-[11px] uppercase tracking-wider text-slate-400">
+                                <th class="py-3.5 px-4">Bukti Foto</th>
+                                <th class="py-3.5 px-4">Nama & NIK</th>
+                                <th class="py-3.5 px-4">Waktu Presensi</th>
+                                <th class="py-3.5 px-4">Status</th>
+                                <th class="py-3.5 px-4">Skor Kemiripan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody" class="divide-y divide-slate-800/70 text-xs">
+                            <!-- Diisi secara dinamis -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="emptyLogsState" class="hidden p-10 text-center text-xs text-slate-400">
+                    Belum ada riwayat presensi yang tercatat pada filter ini.
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-500">
+        MediaPipe Face Mesh (468 Landmark Murni) • Penyimpanan Lokal IndexedDB (<code class="text-slate-400">FaceAttendanceDB</code>) • 100% Client-Side
+    </footer>
+
+    <script>
+        /**
+         * ============================================================================
+         * 1. LAYER DATABASE LOKAL (IndexedDB: FaceAttendanceDB)
+         * ============================================================================
+         */
+        const DB_NAME = 'FaceAttendanceDB';
+        const DB_VERSION = 1;
+        let dbInstance = null;
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains('users')) {
+                        const userStore = db.createObjectStore('users', { keyPath: 'id', autoIncrement: true });
+                        userStore.createIndex('nik', 'nik', { unique: true });
+                    }
+                    if (!db.objectStoreNames.contains('attendance_logs')) {
+                        const logStore = db.createObjectStore('attendance_logs', { keyPath: 'id', autoIncrement: true });
+                        logStore.createIndex('dateStr', 'dateStr', { unique: false });
+                    }
+                };
+
+                request.onsuccess = (event) => {
+                    dbInstance = event.target.result;
+                    resolve(dbInstance);
+                };
+
+                request.onerror = (event) => {
+                    reject(event.target.error);
+                };
+            });
+        }
+
+        function dbGetAll(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbAdd(storeName, data) {
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.add(data);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbDelete(storeName, id) {
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.delete(id);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbClear(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = dbInstance.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.clear();
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        /**
+         * ============================================================================
+         * 2. EKSTRAKSI FITUR GEOMETRI 468 TITIK
+         * ============================================================================
+         */
+        
+        /**
+         * Mengekstrak vektor fitur 3D yang invarian terhadap translasi & skala
+         * menggunakan 468 titik koordinat wajah.
+         * - Pusat referensi: Ujung hidung (indeks 1)
+         * - Skala referensi: Jarak Euclidean 3D antara sudut luar mata kanan (33) dan mata kiri (263)
+         */
+        function extractNormalizedEmbedding(landmarks) {
+            if (!landmarks || landmarks.length < 468) return null;
+
+            const noseTip = landmarks[1];
+            const rightEyeOuter = landmarks[33];
+            const leftEyeOuter = landmarks[263];
+
+            const dx = leftEyeOuter.x - rightEyeOuter.x;
+            const dy = leftEyeOuter.y - rightEyeOuter.y;
+            const dz = leftEyeOuter.z - rightEyeOuter.z;
+            const interOcularDist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6;
+
+            // Buat array vektor 468 * 3 = 1404 dimensi ternormalisasi
+            const vector = new Float32Array(468 * 3);
+            let normSq = 0;
+
+            for (let i = 0; i < 468; i++) {
+                const pt = landmarks[i];
+                const nx = (pt.x - noseTip.x) / interOcularDist;
+                const ny = (pt.y - noseTip.y) / interOcularDist;
+                const nz = (pt.z - noseTip.z) / interOcularDist;
+
+                const idx = i * 3;
+                vector[idx] = nx;
+                vector[idx + 1] = ny;
+                vector[idx + 2] = nz;
+
+                normSq += nx * nx + ny * ny + nz * nz;
+            }
+
+            // L2 Normalization untuk mempercepat perhitungan Cosine Similarity
+            const l2Norm = Math.sqrt(normSq) || 1e-6;
+            for (let i = 0; i < vector.length; i++) {
+                vector[i] /= l2Norm;
+            }
+
+            return Array.from(vector);
+        }
+
+        /**
+         * Menghitung Cosine Similarity antara dua vektor embedding ternormalisasi L2
+         * Mengembalikan nilai persentase (0 - 100)
+         */
+        function computeCosineSimilarity(vecA, vecB) {
+            if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+            let dot = 0;
+            for (let i = 0; i < vecA.length; i++) {
+                dot += vecA[i] * vecB[i];
+            }
+            // Clamp antara 0 dan 1 lalu konversi ke skala persentase
+            const clamped = Math.max(0, Math.min(1, dot));
+            return clamped * 100;
+        }
+
+        /**
+         * ============================================================================
+         * 3. AUDIO FEEDBACK (Web Audio API - Tanpa File Eksternal)
+         * ============================================================================
+         */
+        function playBeep(type = 'success') {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                const ctx = new AudioCtx();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                if (type === 'success') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12);
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.25);
+                } else {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(240, ctx.currentTime);
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.2);
+                }
+            } catch (e) {
+                // Abaikan jika browser memblokir audio sebelum interaksi user
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 4. UI NOTIFICATIONS & MODAL KONFIRMASI (Pengganti alert & confirm)
+         * ============================================================================
+         */
+        function showToast(title, message, variant = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                success: 'bg-slate-900 border-emerald-500/50 text-emerald-400',
+                error: 'bg-slate-900 border-rose-500/50 text-rose-400',
+                info: 'bg-slate-900 border-sky-500/50 text-sky-400'
+            };
+
+            toast.className = `pointer-events-auto border ${colors[variant] || colors.info} rounded-2xl p-4 shadow-2xl backdrop-blur-md transition-all duration-300 transform translate-y-0 opacity-100`;
+            toast.innerHTML = `
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <h4 class="text-xs font-bold uppercase tracking-wider">${title}</h4>
+                        <p class="text-xs text-slate-300 mt-1">${message}</p>
+                    </div>
+                    <button class="text-slate-500 hover:text-white text-sm leading-none cursor-pointer">&times;</button>
+                </div>
+            `;
+
+            toast.querySelector('button').onclick = () => toast.remove();
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-x-4');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        function showConfirmModal(title, message) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmModal');
+                document.getElementById('confirmTitle').textContent = title;
+                document.getElementById('confirmMessage').textContent = message;
+                modal.classList.remove('hidden');
+
+                const cleanup = (result) => {
+                    modal.classList.add('hidden');
+                    resolve(result);
+                };
+
+                document.getElementById('confirmOkBtn').onclick = () => cleanup(true);
+                document.getElementById('confirmCancelBtn').onclick = () => cleanup(false);
+            });
+        }
+
+        /**
+         * ============================================================================
+         * 5. STATE APLIKASI & LOGIKA PRESENSI REAL-TIME
+         * ============================================================================
+         */
+        const appState = {
+            users: [],
+            logs: [],
+            currentLandmarks: null,
+            currentMatch: null, // { user, score }
+            attendanceType: 'MASUK',
+            similarityThreshold: 92,
+            dotSize: 1.8,
+            dotColor: '#10b981',
+            showDots: true,
+            showVideo: true,
+            autoAttendance: false,
+            // Cooldown Auto-Attendance per user (milidetik)
+            lastAutoAttendMap: {}
+        };
+
+        // Elemen DOM Kamera & Canvas
+        const videoElement = document.getElementById('inputVideo');
+        const canvasElement = document.getElementById('outputCanvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const canvasContainer = document.getElementById('canvasContainer');
+
+        // Sinkronisasi Ukuran Canvas
+        function resizeCanvas() {
+            const rect = canvasContainer.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                canvasElement.width = rect.width;
+                canvasElement.height = rect.height;
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // Mengambil snapshot foto wajah dari video (efek mirror diterapkan)
+        function captureSnapshotBase64(width = 160, height = 120) {
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = width;
+            offCanvas.height = height;
+            const ctx = offCanvas.getContext('2d');
+            ctx.translate(width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(videoElement, 0, 0, width, height);
+            return offCanvas.toDataURL('image/jpeg', 0.75);
+        }
+
+        // Proses Pencatatan Presensi ke IndexedDB
+        async function recordAttendance(isAuto = false) {
+            if (!appState.currentLandmarks) {
+                if (!isAuto) showToast('Wajah Tidak Terdeteksi', 'Arahkan wajah Anda ke depan kamera terlebih dahulu.', 'error');
+                return;
+            }
+
+            if (appState.users.length === 0) {
+                if (!isAuto) showToast('Database Kosong', 'Belum ada pengguna terdaftar. Silakan registrasi wajah terlebih dahulu.', 'error');
+                return;
+            }
+
+            if (!appState.currentMatch || appState.currentMatch.score < appState.similarityThreshold) {
+                if (!isAuto) {
+                    playBeep('error');
+                    showToast('Wajah Tidak Dikenali', `Skor kemiripan di bawah ambang batas (${appState.similarityThreshold}%).`, 'error');
+                }
+                return;
+            }
+
+            const matchedUser = appState.currentMatch.user;
+            const now = new Date();
+
+            // Cek cooldown jika mode Auto-Scan (jeda 15 detik per pengguna)
+            if (isAuto) {
+                const lastTime = appState.lastAutoAttendMap[matchedUser.id] || 0;
+                if (now.getTime() - lastTime < 15000) return;
+                appState.lastAutoAttendMap[matchedUser.id] = now.getTime();
+            }
+
+            const dateStr = now.toISOString().split('T')[0];
+            const timeStr = now.toTimeString().split(' ')[0];
+            const snapshot = captureSnapshotBase64(160, 120);
+
+            const logEntry = {
+                userId: matchedUser.id,
+                name: matchedUser.name,
+                nik: matchedUser.nik,
+                division: matchedUser.division,
+                type: appState.attendanceType,
+                similarity: Number(appState.currentMatch.score.toFixed(1)),
+                timestamp: now.toISOString(),
+                dateStr: dateStr,
+                timeStr: timeStr,
+                photo: snapshot
+            };
+
+            try {
+                await dbAdd('attendance_logs', logEntry);
+                playBeep('success');
+                showToast(
+                    `Presensi ${appState.attendanceType} Berhasil`,
+                    `${matchedUser.name} (${matchedUser.nik}) • Pukul ${timeStr} • Kemiripan ${logEntry.similarity}%`,
+                    'success'
+                );
+
+                document.getElementById('lastAttendanceText').textContent = `${matchedUser.name} (${appState.attendanceType} - ${timeStr})`;
+
+                await refreshAllData();
+            } catch (err) {
+                console.error('Gagal menyimpan log presensi:', err);
+                showToast('Gagal Menyimpan', 'Terjadi kesalahan saat menulis ke IndexedDB.', 'error');
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 6. MEDIAPIPE FACE MESH CALLBACK (468 TITIK MURNI)
+         * ============================================================================
+         */
+        let isCameraInitialized = false;
+
+        function onFaceMeshResults(results) {
+            if (!isCameraInitialized) {
+                isCameraInitialized = true;
+                document.getElementById('cameraOverlay').classList.add('opacity-0', 'pointer-events-none');
+            }
+
+            const width = canvasElement.width;
+            const height = canvasElement.height;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, width, height);
+
+            // Efek cermin (mirror)
+            canvasCtx.translate(width, 0);
+            canvasCtx.scale(-1, 1);
+
+            if (appState.showVideo && results.image) {
+                canvasCtx.drawImage(results.image, 0, 0, width, height);
+            } else {
+                canvasCtx.fillStyle = '#090d16';
+                canvasCtx.fillRect(0, 0, width, height);
+            }
+
+            const faceStatusDot = document.getElementById('faceStatusDot');
+            const faceStatusText = document.getElementById('faceStatusText');
+            const landmarkCount = document.getElementById('landmarkCount');
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                appState.currentLandmarks = landmarks;
+
+                faceStatusDot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+                faceStatusText.textContent = 'Wajah Terdeteksi';
+                landmarkCount.textContent = landmarks.length; // 468 titik
+
+                // Gambar 468 Titik Murni (TANPA jaring/tesselation mask)
+                if (appState.showDots) {
+                    canvasCtx.fillStyle = appState.dotColor;
+                    const twoPi = Math.PI * 2;
+                    for (let i = 0; i < landmarks.length; i++) {
+                        const pt = landmarks[i];
+                        canvasCtx.beginPath();
+                        canvasCtx.arc(pt.x * width, pt.y * height, appState.dotSize, 0, twoPi);
+                        canvasCtx.fill();
+                    }
+                }
+
+                // Pencocokan Biometrik dengan Database Pengguna
+                if (appState.users.length > 0) {
+                    const liveEmbedding = extractNormalizedEmbedding(landmarks);
+                    let bestUser = null;
+                    let bestScore = 0;
+
+                    for (const user of appState.users) {
+                        const score = computeCosineSimilarity(liveEmbedding, user.embedding);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestUser = user;
+                        }
+                    }
+
+                    appState.currentMatch = { user: bestUser, score: bestScore };
+                    updateRecognitionBanner(bestUser, bestScore);
+
+                    // Jalankan Auto-Presensi jika aktif dan skor memenuhi ambang batas
+                    if (appState.autoAttendance && bestScore >= appState.similarityThreshold) {
+                        recordAttendance(true);
+                    }
+                } else {
+                    appState.currentMatch = null;
+                    updateRecognitionBanner(null, 0);
+                }
+
+            } else {
+                appState.currentLandmarks = null;
+                appState.currentMatch = null;
+                faceStatusDot.className = 'w-2 h-2 rounded-full bg-amber-500 animate-pulse';
+                faceStatusText.textContent = 'Wajah Tidak Terdeteksi';
+                landmarkCount.textContent = '0';
+                updateRecognitionBanner(null, 0);
+            }
+
+            canvasCtx.restore();
+        }
+
+        function updateRecognitionBanner(user, score) {
+            const matchName = document.getElementById('matchName');
+            const matchMeta = document.getElementById('matchMeta');
+            const matchScore = document.getElementById('matchScore');
+            const matchAvatar = document.getElementById('matchAvatar');
+            const banner = document.getElementById('recognitionBanner');
+
+            if (!appState.currentLandmarks) {
+                matchName.textContent = 'Belum Ada Wajah Terdeteksi';
+                matchMeta.textContent = 'Posisikan wajah Anda di tengah bingkai kamera';
+                matchScore.textContent = '0.0%';
+                matchScore.className = 'text-sm font-mono font-bold text-slate-500';
+                matchAvatar.innerHTML = '?';
+                banner.className = 'absolute bottom-3 left-3 right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3 transition-all';
+                return;
+            }
+
+            if (!user) {
+                matchName.textContent = 'Wajah Terdeteksi (Database Kosong)';
+                matchMeta.textContent = 'Silakan daftarkan wajah pada formulir di samping';
+                matchScore.textContent = '-';
+                matchAvatar.innerHTML = '!';
+                return;
+            }
+
+            const isMatched = score >= appState.similarityThreshold;
+            matchScore.textContent = `${score.toFixed(1)}%`;
+
+            if (isMatched) {
+                matchName.textContent = user.name;
+                matchMeta.textContent = `${user.nik} • ${user.division}`;
+                matchScore.className = 'text-sm font-mono font-bold text-emerald-400';
+                matchAvatar.innerHTML = `<img src="${user.photo}" alt="${user.name}" class="w-full h-full object-cover">`;
+                banner.className = 'absolute bottom-3 left-3 right-3 bg-emerald-950/85 backdrop-blur-md border border-emerald-500/50 rounded-xl p-3 flex items-center justify-between gap-3 transition-all';
+            } else {
+                matchName.textContent = 'Wajah Tidak Dikenali';
+                matchMeta.textContent = `Kandidat terdekat: ${user.name} (di bawah ${appState.similarityThreshold}%)`;
+                matchScore.className = 'text-sm font-mono font-bold text-rose-400';
+                matchAvatar.innerHTML = '?';
+                banner.className = 'absolute bottom-3 left-3 right-3 bg-slate-950/85 backdrop-blur-md border border-rose-500/40 rounded-xl p-3 flex items-center justify-between gap-3 transition-all';
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 7. RENDER DATA PENGGUNA & RIWAYAT LOG PRESENSI
+         * ============================================================================
+         */
+        async function refreshAllData() {
+            appState.users = await dbGetAll('users');
+            appState.logs = await dbGetAll('attendance_logs');
+
+            // Urutkan log terbaru di atas
+            appState.logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+            // Update counter di navigasi & statistik
+            document.getElementById('navUserCount').textContent = appState.users.length;
+            document.getElementById('navLogCount').textContent = appState.logs.length;
+            document.getElementById('statTotalUsers').textContent = appState.users.length;
+            document.getElementById('statTotalLogs').textContent = appState.logs.length;
+
+            const todayStr = new Date().toISOString().split('T')[0];
+            const todayLogs = appState.logs.filter(l => l.dateStr === todayStr);
+            document.getElementById('statTodayIn').textContent = todayLogs.filter(l => l.type === 'MASUK').length;
+            document.getElementById('statTodayOut').textContent = todayLogs.filter(l => l.type === 'PULANG').length;
+
+            renderUsersGrid();
+            renderLogsTable();
+        }
+
+        function renderUsersGrid() {
+            const grid = document.getElementById('usersGrid');
+            const emptyState = document.getElementById('emptyUsersState');
+            const query = document.getElementById('searchUserInput').value.trim().toLowerCase();
+
+            const filtered = appState.users.filter(u =>
+                u.name.toLowerCase().includes(query) ||
+                u.nik.toLowerCase().includes(query) ||
+                u.division.toLowerCase().includes(query)
+            );
+
+            grid.innerHTML = '';
+
+            if (filtered.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            emptyState.classList.add('hidden');
+
+            for (const user of filtered) {
+                const card = document.createElement('div');
+                card.className = 'bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between gap-4 hover:border-slate-700 transition';
+                card.innerHTML = `
+                    <div class="flex items-center gap-3.5">
+                        <img src="${user.photo}" alt="${user.name}" class="w-14 h-14 rounded-xl object-cover border border-slate-700 bg-slate-800 shrink-0">
+                        <div class="min-w-0">
+                            <h3 class="text-sm font-bold text-white truncate">${user.name}</h3>
+                            <p class="text-xs font-mono text-emerald-400 truncate">${user.nik}</p>
+                            <p class="text-[11px] text-slate-400 truncate mt-0.5">${user.division}</p>
+                        </div>
+                    </div>
+                    <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>468 Titik Tersimpan</span>
+                        <button data-delete-user="${user.id}" class="text-rose-400 hover:text-rose-300 font-semibold px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 transition cursor-pointer">
+                            Hapus
+                        </button>
+                    </div>
+                `;
+
+                card.querySelector(`[data-delete-user="${user.id}"]`).onclick = async () => {
+                    const ok = await showConfirmModal(
+                        'Hapus Pengguna?',
+                        `Data wajah "${user.name}" (${user.nik}) akan dihapus permanen dari IndexedDB.`
+                    );
+                    if (ok) {
+                        await dbDelete('users', user.id);
+                        showToast('Pengguna Dihapus', `Data ${user.name} telah dihapus.`, 'info');
+                        await refreshAllData();
+                    }
+                };
+
+                grid.appendChild(card);
+            }
+        }
+
+        function renderLogsTable() {
+            const tbody = document.getElementById('logsTableBody');
+            const emptyState = document.getElementById('emptyLogsState');
+            const dateFilter = document.getElementById('filterDateInput').value;
+
+            const filteredLogs = dateFilter
+                ? appState.logs.filter(l => l.dateStr === dateFilter)
+                : appState.logs;
+
+            tbody.innerHTML = '';
+
+            if (filteredLogs.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            emptyState.classList.add('hidden');
+
+            for (const log of filteredLogs) {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800/40 transition';
+
+                const badgeClass = log.type === 'MASUK'
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    : 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+
+                tr.innerHTML = `
+                    <td class="py-3 px-4">
+                        <img src="${log.photo}" alt="${log.name}" class="w-11 h-9 rounded-lg object-cover border border-slate-700 bg-slate-800">
+                    </td>
+                    <td class="py-3 px-4">
+                        <div class="font-bold text-white">${log.name}</div>
+                        <div class="text-[11px] text-slate-400 font-mono">${log.nik} • ${log.division || '-'}</div>
+                    </td>
+                    <td class="py-3 px-4">
+                        <div class="font-mono font-semibold text-slate-200">${log.timeStr}</div>
+                        <div class="text-[11px] text-slate-500">${log.dateStr}</div>
+                    </td>
+                    <td class="py-3 px-4">
+                        <span class="px-2.5 py-1 rounded-lg border text-[11px] font-bold ${badgeClass}">
+                            ${log.type}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 font-mono font-semibold text-emerald-400">
+                        ${log.similarity}%
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        // Export Riwayat ke CSV
+        function exportLogsToCSV() {
+            if (appState.logs.length === 0) {
+                showToast('Tidak Ada Data', 'Riwayat presensi masih kosong untuk diekspor.', 'error');
+                return;
+            }
+
+            const headers = ['ID', 'Nama', 'NIK', 'Divisi', 'Tanggal', 'Waktu', 'Status', 'Skor Kemiripan (%)'];
+            const rows = appState.logs.map(l => [
+                l.id,
+                `"${l.name}"`,
+                `"${l.nik}"`,
+                `"${l.division || '-'}"`,
+                l.dateStr,
+                l.timeStr,
+                l.type,
+                l.similarity
+            ]);
+
+            const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `presensi_wajah_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            showToast('Export Berhasil', 'File CSV riwayat presensi telah diunduh.', 'success');
+        }
+
+        /**
+         * ============================================================================
+         * 8. EVENT LISTENERS & INISIALISASI APLIKASI
+         * ============================================================================
+         */
+        function setupEventListeners() {
+            // Navigasi Tab
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const target = btn.dataset.tab;
+                    document.querySelectorAll('.tab-btn').forEach(b => {
+                        b.className = 'tab-btn flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 text-slate-400 hover:text-white cursor-pointer';
+                    });
+                    btn.className = 'tab-btn active flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 bg-emerald-600 text-white shadow cursor-pointer';
+
+                    document.querySelectorAll('.tab-content').forEach(sec => sec.classList.add('hidden'));
+                    document.getElementById(`tab-${target}`).classList.remove('hidden');
+
+                    if (target === 'camera') resizeCanvas();
+                });
+            });
+
+            // Pilihan Tipe Presensi (MASUK / PULANG)
+            document.querySelectorAll('.attendance-type-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    appState.attendanceType = btn.dataset.type;
+                    document.querySelectorAll('.attendance-type-btn').forEach(b => {
+                        b.className = 'attendance-type-btn py-2.5 px-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-400 hover:text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer';
+                    });
+                    if (appState.attendanceType === 'MASUK') {
+                        btn.className = 'attendance-type-btn active py-2.5 px-3 rounded-xl border border-emerald-500 bg-emerald-500/15 text-emerald-400 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer';
+                    } else {
+                        btn.className = 'attendance-type-btn active py-2.5 px-3 rounded-xl border border-sky-500 bg-sky-500/15 text-sky-400 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer';
+                    }
+                });
+            });
+
+            // Tombol Presensi Manual
+            document.getElementById('manualAttendBtn').addEventListener('click', () => recordAttendance(false));
+
+            // Kontrol Slider & Toggle
+            document.getElementById('thresholdSlider').addEventListener('input', (e) => {
+                appState.similarityThreshold = parseInt(e.target.value, 10);
+                document.getElementById('thresholdVal').textContent = `${appState.similarityThreshold}%`;
+            });
+
+            document.getElementById('dotSizeSlider').addEventListener('input', (e) => {
+                appState.dotSize = parseFloat(e.target.value);
+                document.getElementById('dotSizeVal').textContent = `${appState.dotSize.toFixed(1)} px`;
+            });
+
+            document.getElementById('dotColorPicker').addEventListener('input', (e) => {
+                appState.dotColor = e.target.value;
+            });
+
+            document.getElementById('showDotsToggle').addEventListener('change', (e) => {
+                appState.showDots = e.target.checked;
+            });
+
+            document.getElementById('showVideoToggle').addEventListener('change', (e) => {
+                appState.showVideo = e.target.checked;
+            });
+
+            document.getElementById('autoAttendanceToggle').addEventListener('change', (e) => {
+                appState.autoAttendance = e.target.checked;
+                showToast(
+                    appState.autoAttendance ? 'Auto-Scan Aktif' : 'Auto-Scan Dimatikan',
+                    appState.autoAttendance
+                        ? 'Sistem akan otomatis mencatat presensi saat wajah cocok.'
+                        : 'Gunakan tombol "Catat Presensi Sekarang" secara manual.',
+                    'info'
+                );
+            });
+
+            // Form Registrasi Wajah Baru
+            document.getElementById('registerForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                if (!appState.currentLandmarks) {
+                    playBeep('error');
+                    showToast('Wajah Tidak Terdeteksi', 'Pastikan wajah Anda terlihat jelas di kamera sebelum menyimpan.', 'error');
+                    return;
+                }
+
+                const name = document.getElementById('regName').value.trim();
+                const nik = document.getElementById('regNik').value.trim();
+                const division = document.getElementById('regDivision').value.trim();
+
+                if (!name || !nik || !division) return;
+
+                // Cek duplikasi NIK
+                const isDuplicateNik = appState.users.some(u => u.nik.toLowerCase() === nik.toLowerCase());
+                if (isDuplicateNik) {
+                    playBeep('error');
+                    showToast('NIK Sudah Terdaftar', `Pengguna dengan ID/NIK "${nik}" sudah ada di database.`, 'error');
+                    return;
+                }
+
+                const embedding = extractNormalizedEmbedding(appState.currentLandmarks);
+                const photo = captureSnapshotBase64(160, 120);
+
+                try {
+                    await dbAdd('users', {
+                        name,
+                        nik,
+                        division,
+                        embedding,
+                        photo,
+                        createdAt: new Date().toISOString()
+                    });
+
+                    playBeep('success');
+                    showToast('Registrasi Berhasil', `Wajah ${name} (${nik}) berhasil disimpan ke IndexedDB.`, 'success');
+                    e.target.reset();
+                    await refreshAllData();
+                } catch (err) {
+                    console.error('Gagal menyimpan pengguna:', err);
+                    playBeep('error');
+                    showToast('Gagal Registrasi', 'Terjadi kesalahan saat menyimpan data wajah ke IndexedDB.', 'error');
+                }
+            });
+
+            // Filter Pencarian Pengguna & Tanggal Riwayat
+            document.getElementById('searchUserInput').addEventListener('input', renderUsersGrid);
+            document.getElementById('filterDateInput').addEventListener('change', renderLogsTable);
+            document.getElementById('clearDateFilterBtn').addEventListener('click', () => {
+                document.getElementById('filterDateInput').value = '';
+                renderLogsTable();
+            });
+
+            // Export & Reset Log / Database
+            document.getElementById('exportCsvBtn').addEventListener('click', exportLogsToCSV);
+            document.getElementById('resetLogsBtn').addEventListener('click', async () => {
+                const ok = await showConfirmModal(
+                    'Reset Semua Riwayat Presensi?',
+                    'Seluruh log kehadiran di IndexedDB akan dihapus permanen. Data pengguna tetap aman.'
+                );
+                if (ok) {
+                    await dbClear('attendance_logs');
+                    showToast('Log Direset', 'Semua riwayat presensi telah dikosongkan.', 'info');
+                    await refreshAllData();
+                }
+            });
+
+            document.getElementById('resetAllDbBtn').addEventListener('click', async () => {
+                const ok = await showConfirmModal(
+                    'Reset Seluruh Database?',
+                    'Semua data pengguna terdaftar dan riwayat presensi di IndexedDB akan dihapus permanen.'
+                );
+                if (ok) {
+                    await dbClear('users');
+                    await dbClear('attendance_logs');
+                    appState.lastAutoAttendMap = {};
+                    showToast('Database Direset', 'Seluruh data pengguna dan log presensi telah dihapus.', 'info');
+                    await refreshAllData();
+                }
+            });
+
+            // Jam Real-time di Header
+            setInterval(() => {
+                const now = new Date();
+                document.getElementById('liveTime').textContent = now.toTimeString().split(' ')[0];
+                document.getElementById('liveDate').textContent = now.toLocaleDateString('id-ID', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric'
+                });
+            }, 1000);
+        }
+
+        // Inisialisasi MediaPipe Face Mesh & Kamera
+        async function startFaceMeshCamera() {
+            const faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+
+            // Tepat 468 titik koordinat wajah (tanpa iris refinement)
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: false,
+                minDetectionConfidence: 0.55,
+                minTrackingConfidence: 0.55
+            });
+
+            faceMesh.onResults(onFaceMeshResults);
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+
+            try {
+                document.getElementById('cameraSpinner').classList.remove('hidden');
+                document.getElementById('retryCameraBtn').classList.add('hidden');
+                await camera.start();
+            } catch (err) {
+                console.error('Camera start error:', err);
+                document.getElementById('cameraSpinner').classList.add('hidden');
+                document.getElementById('retryCameraBtn').classList.remove('hidden');
+                document.getElementById('overlayTitle').textContent = 'Kamera Tidak Dapat Diakses';
+                document.getElementById('overlayDesc').textContent = 'Pastikan webcam terpasang dan Anda telah mengizinkan akses kamera di browser.';
+            }
+        }
+
+        document.getElementById('retryCameraBtn').addEventListener('click', startFaceMeshCamera);
+
+        // Bootstrap Aplikasi saat halaman dimuat
+        window.onload = async () => {
+            resizeCanvas();
+            setupEventListeners();
+            try {
+                await initDB();
+                await refreshAllData();
+            } catch (err) {
+                showToast('Error Database', 'Browser Anda tidak mendukung IndexedDB.', 'error');
+            }
+            await startFaceMeshCamera();
+        };
+    </script>
+</body>
+</html>
