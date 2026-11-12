@@ -1,7 +1,7 @@
 
 const ALLOWED_ORIGINS = [
   "https://anita2121.github.io"
-];
+]; 
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
