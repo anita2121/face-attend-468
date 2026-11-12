@@ -227,17 +227,17 @@ async function apiRequest(path, options = {}) {
     let response;
 
     try {
-        response = await fetch(API_URL + path, {
+        response = await fetch(${API_URL}${path}, {
             ...options,
+            mode: "cors",
             headers: {
                 "Content-Type": "application/json",
                 ...(options.headers || {})
             }
         });
     } catch (error) {
-        throw new Error(
-            "Tidak dapat menghubungi Worker. Periksa URL dan koneksi internet."
-        );
+        console.error("Worker connection error:", error);
+        throw new Error("Tidak dapat menghubungi Worker. Periksa URL, CORS, dan koneksi internet.");
     }
 
     let result;
@@ -245,18 +245,15 @@ async function apiRequest(path, options = {}) {
     try {
         result = await response.json();
     } catch {
-        throw new Error("Respons backend bukan JSON.");
+        throw new Error(Respons Worker tidak valid: HTTP ${response.status});
     }
 
     if (!response.ok || result.success !== true) {
-        throw new Error(
-            result.message || "HTTP " + response.status
-        );
+        throw new Error(result.message || HTTP ${response.status});
     }
 
     return result;
 }
-
 async function initDB() {
     const result = await apiRequest("/api/health");
 
