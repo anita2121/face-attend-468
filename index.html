@@ -885,6 +885,91 @@ $("clearLogsBtn").onclick = async () => {
     }
 };
 
+   let camera = null;
+let faceMesh = null;
+
+async function startFaceMeshCamera() {
+    const overlay = document.getElementById('cameraOverlay');
+    const spinner = document.getElementById('cameraSpinner');
+    const retryBtn = document.getElementById('retryCameraBtn');
+    const title = document.getElementById('overlayTitle');
+    const desc = document.getElementById('overlayDesc');
+
+    try {
+        spinner.classList.remove('hidden');
+        retryBtn.classList.add('hidden');
+        overlay.classList.remove('opacity-0', 'pointer-events-none');
+
+        title.textContent = 'Mengaktifkan Kamera...';
+        desc.textContent = 'Memuat model pengenalan wajah 468 titik.';
+
+        // Periksa dukungan kamera
+        if (!navigator.mediaDevices ||
+            !navigator.mediaDevices.getUserMedia) {
+            throw new Error(
+                'Browser tidak mendukung kamera. Buka website melalui HTTPS.'
+            );
+        }
+
+        // Periksa library MediaPipe
+        if (typeof FaceMesh === 'undefined') {
+            throw new Error('Library FaceMesh gagal dimuat.');
+        }
+
+        if (typeof Camera === 'undefined') {
+            throw new Error('Library Camera Utils gagal dimuat.');
+        }
+
+        // Inisialisasi FaceMesh
+        faceMesh = new FaceMesh({
+            locateFile: (file) =>
+                https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}
+        });
+
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: false,
+            minDetectionConfidence: 0.55,
+            minTrackingConfidence: 0.55
+        });
+
+        faceMesh.onResults(onFaceMeshResults);
+
+        // Inisialisasi kamera
+        camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if (videoElement.readyState >= 2) {
+                    await faceMesh.send({
+                        image: videoElement
+                    });
+                }
+            },
+            width: 640,
+            height: 480
+        });
+
+        await camera.start();
+
+        title.textContent = 'Kamera Aktif';
+        desc.textContent = 'Arahkan wajah ke kamera.';
+
+    } catch (err) {
+        console.error('Camera Error:', err);
+
+        spinner.classList.add('hidden');
+        retryBtn.classList.remove('hidden');
+
+        title.textContent = 'Kamera Tidak Dapat Dibuka';
+        desc.textContent = err.message ||
+            'Periksa izin kamera dan koneksi internet.';
+
+        overlay.classList.remove(
+            'opacity-0',
+            'pointer-events-none'
+        );
+    }
+}
+
 /* =====================================
    13. JAM
 ===================================== */
@@ -906,6 +991,9 @@ function updateClock() {
 
 setInterval(updateClock,1000);
 updateClock();
+
+
+   
 
 /* =====================================
    14. MULAI APLIKASI
