@@ -1,1026 +1,1423 @@
 
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FaceAttend 468 - Cloudflare D1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FaceAttend 468 - Presensi Wajah</title>
+
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
 <style>
-body{font-family:Inter,Arial,sans-serif;background:#020617;color:#f1f5f9}
-button,input{font:inherit}
-.card{background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:18px}
-.btn{padding:11px 15px;border-radius:10px;background:#059669;color:white;font-weight:700}
-.btn:hover{background:#10b981}
-input{background:#020617;border:1px solid #334155;padding:10px;border-radius:9px;width:100%;color:white}
-.tab{padding:10px 15px;border-radius:9px;background:#1e293b}
-.tab.active{background:#059669}
+body { font-family: Inter, sans-serif; }
+input[type=range] { accent-color: #10b981; }
+::-webkit-scrollbar { width:6px;height:6px }
+::-webkit-scrollbar-track { background:#0f172a }
+::-webkit-scrollbar-thumb { background:#334155;border-radius:999px }
+video { transform: scaleX(-1); }
 </style>
 </head>
 
-<body class="min-h-screen">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
-<header class="bg-slate-900 border-b border-slate-800 p-4">
-<div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
-<div>
-<h1 class="text-xl font-bold text-emerald-400">FaceAttend 468</h1>
-<p class="text-xs text-slate-400">MediaPipe + Cloudflare Workers + D1</p>
+<div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+<div id="confirmModal" class="hidden fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-4">
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6">
+    <h3 id="confirmTitle" class="text-lg font-bold mb-2"></h3>
+    <p id="confirmMessage" class="text-sm text-slate-400 mb-6"></p>
+    <div class="flex justify-end gap-3">
+      <button id="confirmCancelBtn" class="px-4 py-2 rounded-xl bg-slate-800 text-xs">Batal</button>
+      <button id="confirmOkBtn" class="px-4 py-2 rounded-xl bg-rose-600 text-xs">Ya, Lanjutkan</button>
+    </div>
+  </div>
 </div>
-<div class="text-right">
-<div id="clock" class="font-bold text-emerald-400"></div>
-<div id="date" class="text-xs text-slate-400"></div>
-</div>
-</div>
+
+<header class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-30">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl">◉</div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="font-bold text-lg">FaceAttend 468</h1>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">CLOUD D1</span>
+        </div>
+        <p class="text-xs text-slate-400">Presensi Biometrik 468 Titik Landmark Wajah</p>
+      </div>
+    </div>
+
+    <nav class="flex bg-slate-950 p-1 rounded-xl border border-slate-800 w-full md:w-auto">
+      <button data-tab="camera" class="tab-btn flex-1 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white">Kamera & Registrasi</button>
+      <button data-tab="users" class="tab-btn flex-1 px-4 py-2 rounded-lg text-xs font-semibold text-slate-400">Pengguna (<span id="navUserCount">0</span>)</button>
+      <button data-tab="logs" class="tab-btn flex-1 px-4 py-2 rounded-lg text-xs font-semibold text-slate-400">Riwayat (<span id="navLogCount">0</span>)</button>
+    </nav>
+
+    <div class="hidden lg:block text-right">
+      <div id="liveTime" class="font-mono text-emerald-400 font-bold">00:00:00</div>
+      <div id="liveDate" class="text-xs text-slate-400">-</div>
+    </div>
+  </div>
 </header>
 
-<main class="max-w-7xl mx-auto p-4 space-y-5">
+<main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex-grow">
 
-<div class="flex flex-wrap gap-2">
-<button class="tab active" data-tab="camera">Kamera & Registrasi</button>
-<button class="tab" data-tab="users">Pengguna</button>
-<button class="tab" data-tab="logs">Riwayat</button>
-</div>
+<!-- CAMERA TAB -->
+<section id="tab-camera" class="tab-content grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-<div id="backendStatus" class="card text-sm">
-Menghubungkan ke Cloudflare D1...
-</div>
+  <div class="lg:col-span-7 flex flex-col gap-4">
+    <div id="canvasContainer" class="relative w-full aspect-[4/3] bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl">
+      <video id="inputVideo" autoplay playsinline muted class="hidden"></video>
+      <canvas id="outputCanvas" class="w-full h-full block"></canvas>
 
-<section id="camera" class="tab-content grid lg:grid-cols-2 gap-5">
+      <div id="cameraOverlay" class="absolute inset-0 bg-slate-950/85 flex flex-col items-center justify-center p-6 text-center z-10">
+        <div id="cameraSpinner" class="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+        <h3 id="overlayTitle" class="font-semibold mb-2">Mengaktifkan Kamera...</h3>
+        <p id="overlayDesc" class="text-xs text-slate-400 max-w-sm">Izinkan akses kamera untuk memulai deteksi wajah.</p>
+        <button id="retryCameraBtn" class="hidden mt-4 px-4 py-2 bg-emerald-600 rounded-xl text-xs font-semibold">Coba Hubungkan Kamera</button>
+      </div>
 
-<div class="card space-y-3">
-<h2 class="font-bold text-lg">Kamera Face Mesh</h2>
+      <div class="absolute top-3 left-3 right-3 flex justify-between pointer-events-none gap-2">
+        <div class="bg-slate-950/80 px-3 py-2 rounded-xl text-xs flex items-center gap-2">
+          <span id="faceStatusDot" class="w-2 h-2 rounded-full bg-amber-500"></span>
+          <span id="faceStatusText">Mencari wajah...</span>
+        </div>
+        <div class="bg-slate-950/80 px-3 py-2 rounded-xl text-xs font-mono text-emerald-400">
+          <span id="landmarkCount">0</span>/468 Titik
+        </div>
+      </div>
 
-<div class="relative bg-black rounded-xl overflow-hidden">
-<video id="video" autoplay playsinline class="hidden"></video>
-<canvas id="canvas" class="w-full block"></canvas>
-</div>
+      <div id="recognitionBanner" class="absolute bottom-3 left-3 right-3 bg-slate-950/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p id="matchName" class="text-sm font-bold truncate">Belum Ada Wajah Dikenali</p>
+          <p id="matchMeta" class="text-xs text-slate-400 truncate">Arahkan wajah ke kamera</p>
+        </div>
+        <div class="text-right shrink-0">
+          <span class="text-[10px] text-slate-500 block">KEMIRIPAN</span>
+          <span id="matchScore" class="font-mono text-emerald-400">0.0%</span>
+        </div>
+      </div>
+    </div>
 
-<div class="flex justify-between text-sm">
-<span id="faceStatus">Mencari wajah...</span>
-<span id="pointCount" class="text-emerald-400">0/468</span>
-</div>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <div class="flex justify-between text-xs mb-2">
+          <span class="text-slate-400">Ambang Kemiripan</span>
+          <span id="thresholdVal" class="text-emerald-400">92%</span>
+        </div>
+        <input id="thresholdSlider" type="range" min="80" max="99" value="92" class="w-full">
+      </div>
 
-<div>
-<label class="text-xs text-slate-400">Ambang kemiripan (%)</label>
-<input id="threshold" type="number" min="1" max="100" value="92">
-</div>
+      <div>
+        <div class="flex justify-between text-xs mb-2">
+          <span class="text-slate-400">Ukuran Titik</span>
+          <span id="dotSizeVal" class="text-emerald-400">1.8 px</span>
+        </div>
+        <input id="dotSizeSlider" type="range" min="1" max="5" step="0.2" value="1.8" class="w-full">
+      </div>
 
-<button id="retryCamera" class="btn w-full">Hubungkan Kamera</button>
-</div>
+      <div class="flex justify-between items-center text-xs">
+        <span>Warna Titik</span>
+        <input id="dotColorPicker" type="color" value="#10b981">
+      </div>
 
-<div class="space-y-5">
+      <div class="flex flex-wrap gap-4 text-xs">
+        <label><input id="showDotsToggle" type="checkbox" checked> Tampilkan titik</label>
+        <label><input id="showVideoToggle" type="checkbox" checked> Tampilkan video</label>
+      </div>
+    </div>
 
-<div class="card space-y-3">
-<h2 class="font-bold text-lg">Registrasi Wajah</h2>
+    <div class="flex flex-wrap gap-3">
+      <span id="backendStatus" class="text-xs text-amber-400">● Memeriksa backend...</span>
+      <span id="cameraStatus" class="text-xs text-slate-400">● Kamera belum aktif</span>
+    </div>
+  </div>
 
-<input id="regName" placeholder="Nama lengkap">
-<input id="regNik" placeholder="NIK / ID pengguna">
-<input id="regDivision" placeholder="Divisi">
+  <div class="lg:col-span-5 flex flex-col gap-5">
 
-<button id="registerBtn" class="btn w-full">
-Simpan Wajah ke Database
-</button>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h2 class="font-bold">Terminal Presensi</h2>
+          <p class="text-xs text-slate-400">Presensi masuk dan pulang</p>
+        </div>
+        <label class="text-xs flex items-center gap-2">
+          Auto-Scan
+          <input id="autoAttendanceToggle" type="checkbox">
+        </label>
+      </div>
 
-<p class="text-xs text-slate-400">
-Pastikan wajah terdeteksi sebelum mendaftar.
-</p>
-</div>
+      <div class="grid grid-cols-2 gap-2 mb-4">
+        <button data-type="MASUK" class="attendance-type-btn py-3 rounded-xl border border-emerald-500 bg-emerald-500/15 text-emerald-400 text-xs font-bold">ABSEN MASUK</button>
+        <button data-type="PULANG" class="attendance-type-btn py-3 rounded-xl border border-slate-800 bg-slate-950 text-xs font-bold">ABSEN PULANG</button>
+      </div>
 
-<div class="card space-y-3">
-<h2 class="font-bold text-lg">Terminal Presensi</h2>
+      <button id="manualAttendBtn" class="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-sm">
+        ✓ Catat Presensi Sekarang
+      </button>
 
-<div class="grid grid-cols-2 gap-2">
-<button class="btn" id="masukBtn">ABSEN MASUK</button>
-<button class="btn bg-sky-600" id="pulangBtn">ABSEN PULANG</button>
-</div>
+      <div class="mt-4 pt-3 border-t border-slate-800 flex justify-between text-xs">
+        <span class="text-slate-500">Presensi terakhir</span>
+        <span id="lastAttendanceText">Belum ada data hari ini</span>
+      </div>
+    </div>
 
-<div id="recognition" class="text-center py-4">
-<p class="text-slate-400">Belum ada wajah dikenali</p>
-</div>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <h2 class="font-bold mb-1">Registrasi Wajah Baru</h2>
+      <p class="text-xs text-slate-400 mb-4">Simpan embedding 468 titik ke Cloudflare D1</p>
 
-<button id="attendBtn" class="btn w-full">
-Catat Presensi Sekarang
-</button>
+      <form id="registerForm" class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-300">Nama Lengkap</label>
+          <input id="regName" required maxlength="200" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm">
+        </div>
 
-<label class="flex gap-2 items-center text-sm">
-<input id="autoScan" type="checkbox" style="width:auto">
-Aktifkan Auto-Scan
-</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-slate-300">NIK / NIP / ID</label>
+            <input id="regNik" required maxlength="100" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm">
+          </div>
+          <div>
+            <label class="text-xs text-slate-300">Divisi</label>
+            <input id="regDivision" required maxlength="200" class="w-full mt-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm">
+          </div>
+        </div>
 
-</div>
-</div>
+        <button id="registerBtn" type="submit" class="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 font-semibold text-sm">
+          Rekam Wajah & Simpan Pengguna
+        </button>
+      </form>
+    </div>
+  </div>
 </section>
 
-<section id="users" class="tab-content hidden space-y-4">
-<div class="card">
-<h2 class="font-bold text-lg mb-3">Data Pengguna</h2>
-<div class="overflow-x-auto">
-<table class="w-full text-sm text-left">
-<thead>
-<tr class="text-slate-400 border-b border-slate-700">
-<th class="p-3">Nama</th>
-<th class="p-3">NIK</th>
-<th class="p-3">Divisi</th>
-<th class="p-3">Aksi</th>
-</tr>
-</thead>
-<tbody id="usersBody"></tbody>
-</table>
-</div>
-</div>
+<!-- USERS TAB -->
+<section id="tab-users" class="tab-content hidden space-y-5">
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+    <h2 class="font-bold text-lg">Database Wajah Terdaftar</h2>
+    <p class="text-xs text-slate-400 mb-4">Data pengguna tersimpan di Cloudflare D1.</p>
+    <input id="searchUserInput" placeholder="Cari nama, NIK, atau divisi..." class="w-full sm:w-80 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm">
+  </div>
+
+  <div id="usersGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+
+  <div id="emptyUsersState" class="hidden bg-slate-900 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
+    <h3 class="font-bold">Belum Ada Pengguna</h3>
+    <p class="text-xs text-slate-400 mt-2">Silakan daftarkan wajah terlebih dahulu.</p>
+  </div>
 </section>
 
-<section id="logs" class="tab-content hidden space-y-4">
-<div class="card">
-<div class="flex flex-wrap justify-between gap-3 mb-4">
-<h2 class="font-bold text-lg">Riwayat Presensi</h2>
-<div class="flex gap-2">
-<button id="refreshBtn" class="btn">Refresh</button>
-<button id="exportBtn" class="btn">Export CSV</button>
-</div>
-</div>
+<!-- LOGS TAB -->
+<section id="tab-logs" class="tab-content hidden space-y-5">
 
-<div class="overflow-x-auto">
-<table class="w-full text-sm text-left">
-<thead>
-<tr class="text-slate-400 border-b border-slate-700">
-<th class="p-3">Nama</th>
-<th class="p-3">NIK</th>
-<th class="p-3">Tanggal</th>
-<th class="p-3">Waktu</th>
-<th class="p-3">Status</th>
-<th class="p-3">Kemiripan</th>
-</tr>
-</thead>
-<tbody id="logsBody"></tbody>
-</table>
-</div>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+      <span class="text-xs text-slate-400">Total Karyawan</span>
+      <p id="statTotalUsers" class="text-2xl font-bold mt-1">0</p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+      <span class="text-xs text-slate-400">Masuk Hari Ini</span>
+      <p id="statTodayIn" class="text-2xl font-bold text-emerald-400 mt-1">0</p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+      <span class="text-xs text-slate-400">Pulang Hari Ini</span>
+      <p id="statTodayOut" class="text-2xl font-bold text-sky-400 mt-1">0</p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+      <span class="text-xs text-slate-400">Total Log</span>
+      <p id="statTotalLogs" class="text-2xl font-bold mt-1">0</p>
+    </div>
+  </div>
 
-<button id="clearLogsBtn" class="btn bg-rose-600 mt-4">
-Hapus Semua Riwayat
-</button>
-</div>
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap justify-between gap-3">
+    <div class="flex flex-wrap gap-2">
+      <input id="filterDateInput" type="date" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+      <button id="clearDateFilterBtn" class="px-3 py-2 rounded-xl bg-slate-800 text-xs">Semua Tanggal</button>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      <button id="exportCsvBtn" class="px-4 py-2 rounded-xl bg-emerald-600 text-xs font-semibold">Export CSV</button>
+      <button id="resetLogsBtn" class="px-4 py-2 rounded-xl bg-amber-500/10 text-amber-400 text-xs">Reset Log</button>
+      <button id="resetAllDbBtn" class="px-4 py-2 rounded-xl bg-rose-500/10 text-rose-400 text-xs">Reset Database</button>
+    </div>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead class="bg-slate-950 text-slate-400 uppercase">
+          <tr>
+            <th class="p-4">Foto</th>
+            <th class="p-4">Nama & NIK</th>
+            <th class="p-4">Waktu</th>
+            <th class="p-4">Status</th>
+            <th class="p-4">Kemiripan</th>
+          </tr>
+        </thead>
+        <tbody id="logsTableBody" class="divide-y divide-slate-800"></tbody>
+      </table>
+    </div>
+    <div id="emptyLogsState" class="hidden p-10 text-center text-xs text-slate-400">Belum ada riwayat presensi.</div>
+  </div>
 </section>
-
-<div class="card">
-<h2 class="font-bold mb-3">Statistik</h2>
-<div class="grid grid-cols-3 gap-3 text-center">
-<div>
-<p class="text-xs text-slate-400">Pengguna</p>
-<strong id="totalUsers" class="text-2xl">0</strong>
-</div>
-<div>
-<p class="text-xs text-slate-400">Total Presensi</p>
-<strong id="totalLogs" class="text-2xl">0</strong>
-</div>
-<div>
-<p class="text-xs text-slate-400">Presensi Hari Ini</p>
-<strong id="todayLogs" class="text-2xl">0</strong>
-</div>
-</div>
-</div>
 
 </main>
 
-<div id="toast" class="fixed bottom-5 left-4 right-4 mx-auto max-w-md bg-slate-800 border border-slate-600 rounded-xl p-4 hidden z-50"></div>
+<footer class="border-t border-slate-900 py-4 text-center text-xs text-slate-500">
+  MediaPipe Face Mesh • 468 Landmark • Cloudflare Workers • Cloudflare D1
+</footer>
 
 <script>
 "use strict";
 
-/* =====================================
-   1. KONFIGURASI BACKEND
-===================================== */
+// =====================================================
+// 1. KONFIGURASI
+// =====================================================
 
-const API_URL =
-"https://polished-mountain-3c79.anitarednosari001.workers.dev";
+const API_BASE = "https://polished-mountain-3c79.anitarednosari001.workers.dev";
 
-let users = [];
-let logs = [];
-let currentLandmarks = null;
-let currentMatch = null;
-let attendanceType = "MASUK";
-let faceMesh = null;
-let camera = null;
-let saving = false;
-let lastAuto = {};
-let cameraStarting = false;
+const appState = {
+  users: [],
+  logs: [],
+  currentLandmarks: null,
+  currentMatch: null,
+  attendanceType: "MASUK",
+  similarityThreshold: 92,
+  dotSize: 1.8,
+  dotColor: "#10b981",
+  showDots: true,
+  showVideo: true,
+  autoAttendance: false,
+  lastAutoAttendMap: {},
+  attendanceInFlight: false
+};
 
 const $ = id => document.getElementById(id);
 
-function toast(message) {
-    $("toast").textContent = message;
-    $("toast").classList.remove("hidden");
+const videoElement = $("inputVideo");
+const canvasElement = $("outputCanvas");
+const canvasCtx = canvasElement.getContext("2d");
+const canvasContainer = $("canvasContainer");
 
-    clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => {
-        $("toast").classList.add("hidden");
-    }, 3500);
+let faceMesh = null;
+let cameraStream = null;
+let cameraRunning = false;
+let cameraLoopBusy = false;
+let cameraAnimationId = null;
+let cameraStarting = false;
+
+// =====================================================
+// 2. UTILITAS
+// =====================================================
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[char]);
 }
 
-/* =====================================
-   2. API REQUEST
-===================================== */
+function localDateTime(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
 
-async function apiRequest(path, options = {}) {
-    let response;
+  const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
 
-    try {
-        response = await fetch(${API_URL}${path}, {
-            ...options,
-            mode: "cors",
-            headers: {
-                "Content-Type": "application/json",
-                ...(options.headers || {})
-            }
-        });
-    } catch (error) {
-        console.error("Worker connection error:", error);
-        throw new Error("Tidak dapat menghubungi Worker. Periksa URL, CORS, dan koneksi internet.");
-    }
-
-    let result;
-
-    try {
-        result = await response.json();
-    } catch {
-        throw new Error(Respons Worker tidak valid: HTTP ${response.status});
-    }
-
-    if (!response.ok || result.success !== true) {
-        throw new Error(result.message || HTTP ${response.status});
-    }
-
-    return result;
+  return {
+    dateStr: `${p.year}-${p.month}-${p.day}`,
+    timeStr: `${p.hour}:${p.minute}:${p.second}`
+  };
 }
-async function initDB() {
+
+function resizeCanvas() {
+  const rect = canvasContainer.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvasElement.width = Math.round(rect.width * dpr);
+  canvasElement.height = Math.round(rect.height * dpr);
+  canvasCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+window.addEventListener("resize", resizeCanvas);
+
+// =====================================================
+// 3. NOTIFIKASI
+// =====================================================
+
+function showToast(title, message, variant = "success") {
+  const container = $("toastContainer");
+  const toast = document.createElement("div");
+
+  const color = {
+    success: "border-emerald-500 text-emerald-400",
+    error: "border-rose-500 text-rose-400",
+    info: "border-sky-500 text-sky-400"
+  }[variant] || "border-sky-500 text-sky-400";
+
+  toast.className = `pointer-events-auto bg-slate-900 border ${color} rounded-xl p-4 shadow-xl`;
+
+  const heading = document.createElement("b");
+  heading.className = "block text-xs uppercase mb-1";
+  heading.textContent = title;
+
+  const content = document.createElement("p");
+  content.className = "text-xs text-slate-300";
+  content.textContent = message;
+
+  toast.append(heading, content);
+  container.appendChild(toast);
+
+  setTimeout(() => toast.remove(), 4500);
+}
+
+function showConfirmModal(title, message) {
+  return new Promise(resolve => {
+    const modal = $("confirmModal");
+    $("confirmTitle").textContent = title;
+    $("confirmMessage").textContent = message;
+    modal.classList.remove("hidden");
+
+    const finish = value => {
+      modal.classList.add("hidden");
+      $("confirmOkBtn").onclick = null;
+      $("confirmCancelBtn").onclick = null;
+      resolve(value);
+    };
+
+    $("confirmOkBtn").onclick = () => finish(true);
+    $("confirmCancelBtn").onclick = () => finish(false);
+  });
+}
+
+function playBeep(type = "success") {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    const ctx = new AudioContextClass();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.frequency.value = type === "success" ? 880 : 240;
+    gain.gain.value = 0.1;
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.15);
+    oscillator.onended = () => ctx.close();
+  } catch {}
+}
+
+// =====================================================
+// 4. API CLOUDFLARE WORKER
+// =====================================================
+
+async function apiRequest(endpoint, options = {}) {
+  let response;
+
+  try {
+    response = await fetch(API_BASE + endpoint, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers
+      },
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new Error(
+      "Tidak dapat menghubungi Worker. Periksa koneksi internet, URL backend, dan CORS."
+    );
+  }
+
+  const text = await response.text();
+  let data;
+
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`Respons Worker bukan JSON. HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  if (!response.ok || data.success === false) {
+    throw new Error(data.message || data.error || `HTTP ${response.status}`);
+  }
+
+  return data;
+}
+
+async function checkBackend() {
+  try {
     const result = await apiRequest("/api/health");
 
-    if (result.database !== "connected") {
-        throw new Error("Database D1 belum terhubung.");
+    if (!result.database || result.database !== "connected") {
+      throw new Error("Database belum terhubung.");
     }
 
-    $("backendStatus").textContent =
-        "🟢 Backend aktif • Cloudflare D1 terhubung";
-}
-
-/* =====================================
-   3. DATABASE
-===================================== */
-
-async function getUsers() {
-    const result = await apiRequest("/api/users");
-    return result.data || [];
-}
-
-async function getLogs() {
-    const result = await apiRequest("/api/attendance");
-    return result.data || [];
-}
-
-async function addUser(data) {
-    return apiRequest("/api/users", {
-        method: "POST",
-        body: JSON.stringify(data)
-    });
-}
-
-async function addLog(data) {
-    return apiRequest("/api/attendance", {
-        method: "POST",
-        body: JSON.stringify(data)
-    });
-}
-
-async function deleteUser(id) {
-    return apiRequest("/api/users/" + encodeURIComponent(id), {
-        method: "DELETE"
-    });
-}
-
-async function clearLogs() {
-    return apiRequest("/api/attendance", {
-        method: "DELETE"
-    });
-}
-
-/* =====================================
-   4. NORMALISASI EMBEDDING 468 TITIK
-===================================== */
-
-function extractEmbedding(points) {
-    if (!points || points.length !== 468) {
-        throw new Error("Landmark wajah harus berjumlah 468.");
+    if (result.tables &&
+        (!result.tables.users || !result.tables.attendance_logs)) {
+      throw new Error("Tabel users atau attendance_logs belum tersedia.");
     }
 
-    const nose = points[1];
-    const eyeA = points[33];
-    const eyeB = points[263];
+    $("backendStatus").textContent = "● Backend & D1 Terhubung";
+    $("backendStatus").className = "text-xs text-emerald-400";
 
-    const dx = eyeB.x - eyeA.x;
-    const dy = eyeB.y - eyeA.y;
-    const dz = eyeB.z - eyeA.z;
+    return true;
+  } catch (error) {
+    $("backendStatus").textContent = "● Backend Bermasalah";
+    $("backendStatus").className = "text-xs text-rose-400";
+    showToast("Koneksi Backend", error.message, "error");
+    return false;
+  }
+}
 
-    const distance = Math.sqrt(
-        dx*dx + dy*dy + dz*dz
+// =====================================================
+// 5. EMBEDDING 468 LANDMARK
+// =====================================================
+
+function extractNormalizedEmbedding(landmarks) {
+  if (!landmarks || landmarks.length !== 468) return null;
+
+  const nose = landmarks[1];
+  const eyeRight = landmarks[33];
+  const eyeLeft = landmarks[263];
+
+  const dx = eyeLeft.x - eyeRight.x;
+  const dy = eyeLeft.y - eyeRight.y;
+  const dz = eyeLeft.z - eyeRight.z;
+
+  const eyeDistance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+  if (!Number.isFinite(eyeDistance) || eyeDistance < 0.000001) {
+    return null;
+  }
+
+  const vector = new Float32Array(1404);
+  let normSq = 0;
+
+  for (let i = 0; i < 468; i++) {
+    const point = landmarks[i];
+    const x = (point.x - nose.x) / eyeDistance;
+    const y = (point.y - nose.y) / eyeDistance;
+    const z = (point.z - nose.z) / eyeDistance;
+
+    const index = i * 3;
+    vector[index] = x;
+    vector[index + 1] = y;
+    vector[index + 2] = z;
+
+    normSq += x*x + y*y + z*z;
+  }
+
+  const norm = Math.sqrt(normSq);
+  if (!Number.isFinite(norm) || norm === 0) return null;
+
+  for (let i = 0; i < vector.length; i++) {
+    vector[i] /= norm;
+  }
+
+  return Array.from(vector);
+}
+
+function computeCosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) ||
+      a.length !== 1404 || b.length !== 1404) return 0;
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < 1404; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  if (!normA || !normB) return 0;
+
+  const cosine = dot / Math.sqrt(normA * normB);
+  return Math.max(0, Math.min(1, cosine)) * 100;
+}
+
+// =====================================================
+// 6. FOTO WAJAH
+// =====================================================
+
+function captureSnapshotBase64() {
+  if (!videoElement.videoWidth || !videoElement.videoHeight) {
+    throw new Error("Video kamera belum siap.");
+  }
+
+  const width = 160;
+  const height = 120;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext("2d");
+  ctx.translate(width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(videoElement, 0, 0, width, height);
+
+  return canvas.toDataURL("image/jpeg", 0.65);
+}
+
+// =====================================================
+// 7. PENGGUNA DAN RIWAYAT DARI D1
+// =====================================================
+
+async function refreshAllData() {
+  const [userResult, logResult] = await Promise.all([
+    apiRequest("/api/users"),
+    apiRequest("/api/attendance")
+  ]);
+
+  if (!Array.isArray(userResult.data) ||
+      !Array.isArray(logResult.data)) {
+    throw new Error("Format data dari Worker tidak sesuai.");
+  }
+
+  appState.users = userResult.data;
+  appState.logs = logResult.data;
+
+  renderUsersGrid();
+  renderLogsTable();
+  updateStatistics();
+
+  return true;
+}
+
+function updateStatistics() {
+  const users = appState.users;
+  const logs = appState.logs;
+  const today = localDateTime().dateStr;
+
+  const todayLogs = logs.filter(log => log.dateStr === today);
+
+  $("navUserCount").textContent = users.length;
+  $("navLogCount").textContent = logs.length;
+  $("statTotalUsers").textContent = users.length;
+  $("statTotalLogs").textContent = logs.length;
+  $("statTodayIn").textContent = todayLogs.filter(x => x.type === "MASUK").length;
+  $("statTodayOut").textContent = todayLogs.filter(x => x.type === "PULANG").length;
+}
+
+// =====================================================
+// 8. RENDER PENGGUNA
+// =====================================================
+
+function renderUsersGrid() {
+  const grid = $("usersGrid");
+  const empty = $("emptyUsersState");
+  const query = $("searchUserInput").value.trim().toLowerCase();
+
+  const filtered = appState.users.filter(user =>
+    [user.name, user.nik, user.division]
+      .some(value => String(value || "").toLowerCase().includes(query))
+  );
+
+  grid.innerHTML = "";
+
+  empty.classList.toggle("hidden", filtered.length !== 0);
+
+  for (const user of filtered) {
+    const card = document.createElement("div");
+
+    card.className = "bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4";
+
+    const photo = user.photo
+      ? `<img src="${escapeHTML(user.photo)}" class="w-14 h-14 rounded-xl object-cover bg-slate-800">`
+      : `<div class="w-14 h-14 rounded-xl bg-slate-800 flex items-center justify-center">?</div>`;
+
+    card.innerHTML = `
+      <div class="flex items-center gap-3">
+        ${photo}
+        <div class="min-w-0">
+          <h3 class="text-sm font-bold truncate">${escapeHTML(user.name)}</h3>
+          <p class="text-xs text-emerald-400">${escapeHTML(user.nik)}</p>
+          <p class="text-xs text-slate-400">${escapeHTML(user.division)}</p>
+        </div>
+      </div>
+      <div class="flex justify-between items-center border-t border-slate-800 pt-3 text-xs">
+        <span class="text-slate-500">468 titik tersimpan</span>
+        <button data-delete-user="${Number(user.id)}" class="text-rose-400">Hapus</button>
+      </div>
+    `;
+
+    grid.appendChild(card);
+  }
+}
+
+$("usersGrid").addEventListener("click", async event => {
+  const button = event.target.closest("[data-delete-user]");
+  if (!button) return;
+
+  const id = Number(button.dataset.deleteUser);
+  const user = appState.users.find(x => Number(x.id) === id);
+  if (!user) return;
+
+  const ok = await showConfirmModal(
+    "Hapus Pengguna?",
+    `Data ${user.name} dan seluruh riwayat presensinya akan dihapus dari D1.`
+  );
+
+  if (!ok) return;
+
+  try {
+    await apiRequest(`/api/users/${id}`, { method: "DELETE" });
+    await refreshAllData();
+    showToast("Berhasil", "Pengguna berhasil dihapus dari D1.");
+  } catch (error) {
+    showToast("Gagal Menghapus", error.message, "error");
+  }
+});
+
+// =====================================================
+// 9. RENDER RIWAYAT
+// =====================================================
+
+function renderLogsTable() {
+  const tbody = $("logsTableBody");
+  const empty = $("emptyLogsState");
+  const filter = $("filterDateInput").value;
+
+  const filtered = filter
+    ? appState.logs.filter(log => log.dateStr === filter)
+    : appState.logs;
+
+  tbody.innerHTML = "";
+  empty.classList.toggle("hidden", filtered.length !== 0);
+
+  for (const log of filtered) {
+    const tr = document.createElement("tr");
+    tr.className = "hover:bg-slate-800/40";
+
+    const photo = log.photo
+      ? `<img src="${escapeHTML(log.photo)}" class="w-11 h-9 object-cover rounded-lg">`
+      : `<div class="w-11 h-9 bg-slate-800 rounded-lg"></div>`;
+
+    const badge = log.type === "MASUK"
+      ? "bg-emerald-500/15 text-emerald-400"
+      : "bg-sky-500/15 text-sky-400";
+
+    tr.innerHTML = `
+      <td class="p-4">${photo}</td>
+      <td class="p-4">
+        <div class="font-bold">${escapeHTML(log.name)}</div>
+        <div class="text-slate-400">${escapeHTML(log.nik)} · ${escapeHTML(log.division)}</div>
+      </td>
+      <td class="p-4">
+        <div>${escapeHTML(log.timeStr)}</div>
+        <div class="text-slate-500">${escapeHTML(log.dateStr)}</div>
+      </td>
+      <td class="p-4"><span class="px-2 py-1 rounded-lg ${badge}">${escapeHTML(log.type)}</span></td>
+      <td class="p-4 text-emerald-400">${Number(log.similarity).toFixed(1)}%</td>
+    `;
+
+    tbody.appendChild(tr);
+  }
+}
+
+// =====================================================
+// 10. REGISTRASI WAJAH
+// =====================================================
+
+async function registerUser(event) {
+  event.preventDefault();
+
+  const name = $("regName").value.trim();
+  const nik = $("regNik").value.trim();
+  const division = $("regDivision").value.trim();
+
+  if (!name || !nik || !division) {
+    showToast("Data Tidak Lengkap", "Isi nama, NIK, dan divisi.", "error");
+    return;
+  }
+
+  if (!appState.currentLandmarks ||
+      appState.currentLandmarks.length !== 468) {
+    showToast("Wajah Tidak Terdeteksi", "Pastikan kamera mendeteksi 468 titik.", "error");
+    return;
+  }
+
+  if (appState.users.some(user =>
+    String(user.nik).toLowerCase() === nik.toLowerCase()
+  )) {
+    showToast("NIK Duplikat", "NIK sudah terdaftar.", "error");
+    return;
+  }
+
+  const embedding = extractNormalizedEmbedding(appState.currentLandmarks);
+
+  if (!embedding || embedding.length !== 1404) {
+    showToast("Embedding Gagal", "Tidak dapat menghasilkan embedding wajah.", "error");
+    return;
+  }
+
+  const button = $("registerBtn");
+  button.disabled = true;
+  button.textContent = "Menyimpan ke Cloudflare D1...";
+
+  try {
+    const photo = captureSnapshotBase64();
+
+    const result = await apiRequest("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        nik,
+        division,
+        embedding,
+        photo
+      })
+    });
+
+    if (!result.success || !result.data?.id) {
+      throw new Error("Worker belum mengonfirmasi penyimpanan pengguna.");
+    }
+
+    await refreshAllData();
+
+    playBeep("success");
+    showToast(
+      "Registrasi Berhasil",
+      `${name} berhasil disimpan ke database Cloudflare D1.`
     );
 
-    if (!Number.isFinite(distance) || distance < 0.000001) {
-        throw new Error("Gagal mengambil fitur wajah.");
-    }
+    $("registerForm").reset();
 
-    const vector = [];
-
-    let sum = 0;
-
-    for (let i = 0; i < 468; i++) {
-        const p = points[i];
-
-        const x = (p.x - nose.x) / distance;
-        const y = (p.y - nose.y) / distance;
-        const z = (p.z - nose.z) / distance;
-
-        vector.push(x, y, z);
-        sum += x*x + y*y + z*z;
-    }
-
-    const norm = Math.sqrt(sum) || 1;
-
-    return vector.map(v => v / norm);
+  } catch (error) {
+    console.error("Registrasi:", error);
+    playBeep("error");
+    showToast("Gagal Registrasi", error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Rekam Wajah & Simpan Pengguna";
+  }
 }
 
-function similarity(a, b) {
-    if (!Array.isArray(a) ||
-        !Array.isArray(b) ||
-        a.length !== 1404 ||
-        b.length !== 1404) {
-        return 0;
+// =====================================================
+// 11. PRESENSI
+// =====================================================
+
+async function recordAttendance(isAuto = false) {
+  if (appState.attendanceInFlight) return;
+
+  if (!appState.currentLandmarks) {
+    if (!isAuto) showToast("Wajah Tidak Terdeteksi", "Arahkan wajah ke kamera.", "error");
+    return;
+  }
+
+  const match = appState.currentMatch;
+
+  if (!match || match.score < appState.similarityThreshold) {
+    if (!isAuto) showToast("Wajah Tidak Dikenali", "Kemiripan belum mencapai ambang batas.", "error");
+    return;
+  }
+
+  if (!appState.users.length) {
+    if (!isAuto) showToast("Database Kosong", "Daftarkan pengguna terlebih dahulu.", "error");
+    return;
+  }
+
+  const user = match.user;
+  const now = Date.now();
+
+  if (isAuto) {
+    const last = appState.lastAutoAttendMap[user.id] || 0;
+    if (now - last < 15000) return;
+    appState.lastAutoAttendMap[user.id] = now;
+  }
+
+  appState.attendanceInFlight = true;
+
+  try {
+    const photo = captureSnapshotBase64();
+
+    const result = await apiRequest("/api/attendance", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: user.id,
+        type: appState.attendanceType,
+        similarity: Number(match.score.toFixed(2)),
+        photo
+      })
+    });
+
+    if (!result.success || !result.data?.id) {
+      throw new Error("Presensi belum dikonfirmasi oleh database.");
     }
 
-    let dot = 0;
+    const time = result.data.timeStr;
+    $("lastAttendanceText").textContent =
+      `${user.name} (${appState.attendanceType} - ${time})`;
 
-    for (let i = 0; i < a.length; i++) {
-        dot += Number(a[i]) * Number(b[i]);
+    playBeep("success");
+
+    showToast(
+      `Presensi ${appState.attendanceType} Berhasil`,
+      `${user.name} · ${time} · Kemiripan ${match.score.toFixed(1)}%`
+    );
+
+    await refreshAllData();
+
+  } catch (error) {
+    if (!isAuto || !error.message.toLowerCase().includes("sudah tercatat")) {
+      showToast("Presensi Gagal", error.message, "error");
     }
-
-    return Math.max(0, Math.min(1, dot)) * 100;
+  } finally {
+    appState.attendanceInFlight = false;
+  }
 }
 
-/* =====================================
-   5. FOTO KAMERA
-===================================== */
+// =====================================================
+// 12. MEDIAPIPE FACE MESH
+// =====================================================
 
-function capturePhoto() {
-    if (! $("video").videoWidth) {
-        throw new Error("Kamera belum siap.");
-    }
+function updateRecognitionBanner(user, score) {
+  if (!user) {
+    $("matchName").textContent = appState.users.length
+      ? "Wajah Tidak Dikenali"
+      : "Database Pengguna Kosong";
+    $("matchMeta").textContent = "Arahkan wajah ke kamera.";
+    $("matchScore").textContent = "0.0%";
+    return;
+  }
 
-    const c = document.createElement("canvas");
-    c.width = 160;
-    c.height = 120;
+  const matched = score >= appState.similarityThreshold;
 
-    const ctx = c.getContext("2d");
+  $("matchName").textContent = matched ? user.name : "Wajah Tidak Dikenali";
+  $("matchMeta").textContent = matched
+    ? `${user.nik} · ${user.division}`
+    : `Kandidat: ${user.name}`;
 
-    ctx.translate(160, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage($("video"), 0, 0, 160, 120);
-
-    return c.toDataURL("image/jpeg", 0.65);
+  $("matchScore").textContent = `${score.toFixed(1)}%`;
+  $("matchScore").className = matched
+    ? "font-mono text-emerald-400"
+    : "font-mono text-rose-400";
 }
 
-/* =====================================
-   6. REGISTRASI PENGGUNA
-===================================== */
+function onFaceMeshResults(results) {
+  const rect = canvasContainer.getBoundingClientRect();
+  const width = rect.width;
+  const height = rect.height;
 
-async function registerUser() {
-    const name = $("regName").value.trim();
-    const nik = $("regNik").value.trim();
-    const division = $("regDivision").value.trim();
+  canvasCtx.save();
+  canvasCtx.setTransform(
+    canvasElement.width / width, 0,
+    0, canvasElement.height / height,
+    0, 0
+  );
 
-    if (!name || !nik || !division) {
-        toast("Nama, NIK dan divisi wajib diisi.");
-        return;
+  canvasCtx.clearRect(0, 0, width, height);
+  canvasCtx.translate(width, 0);
+  canvasCtx.scale(-1, 1);
+
+  if (appState.showVideo && results.image) {
+    canvasCtx.drawImage(results.image, 0, 0, width, height);
+  } else {
+    canvasCtx.fillStyle = "#090d16";
+    canvasCtx.fillRect(0, 0, width, height);
+  }
+
+  const landmarks = results.multiFaceLandmarks?.[0];
+
+  if (landmarks && landmarks.length === 468) {
+    appState.currentLandmarks = landmarks;
+
+    $("faceStatusDot").className = "w-2 h-2 rounded-full bg-emerald-500";
+    $("faceStatusText").textContent = "468 Titik Terdeteksi";
+    $("landmarkCount").textContent = "468";
+
+    if (appState.showDots) {
+      canvasCtx.fillStyle = appState.dotColor;
+
+      for (const point of landmarks) {
+        canvasCtx.beginPath();
+        canvasCtx.arc(
+          point.x * width,
+          point.y * height,
+          appState.dotSize,
+          0,
+          Math.PI * 2
+        );
+        canvasCtx.fill();
+      }
     }
 
-    if (!currentLandmarks) {
-        toast("Wajah belum terdeteksi.");
-        return;
-    }
-
-    if (users.some(u => String(u.nik).toLowerCase() === nik.toLowerCase())) {
-        toast("NIK sudah terdaftar.");
-        return;
-    }
-
-    const btn = $("registerBtn");
-    btn.disabled = true;
-    btn.textContent = "Menyimpan...";
-
-    try {
-        const embedding = extractEmbedding(currentLandmarks);
-        const photo = capturePhoto();
-
-        await addUser({
-            name,
-            nik,
-            division,
-            embedding,
-            photo,
-            createdAt: new Date().toISOString()
-        });
-
-        $("regName").value = "";
-        $("regNik").value = "";
-        $("regDivision").value = "";
-
-        toast("Registrasi berhasil disimpan ke D1.");
-
-        await refreshAllData();
-
-    } catch (error) {
-        console.error(error);
-        toast("Registrasi gagal: " + error.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = "Simpan Wajah ke Database";
-    }
-}
-
-/* =====================================
-   7. PENCARIAN WAJAH
-===================================== */
-
-function recognizeFace(points) {
-    if (!users.length) {
-        currentMatch = null;
-        showRecognition(null, 0);
-        return;
-    }
-
-    let embedding;
-
-    try {
-        embedding = extractEmbedding(points);
-    } catch {
-        return;
-    }
+    const liveEmbedding = extractNormalizedEmbedding(landmarks);
 
     let bestUser = null;
     let bestScore = 0;
 
-    for (const user of users) {
-        const score = similarity(
-            embedding,
-            user.embedding
-        );
+    if (liveEmbedding) {
+      for (const user of appState.users) {
+        const score = computeCosineSimilarity(liveEmbedding, user.embedding);
 
         if (score > bestScore) {
-            bestScore = score;
-            bestUser = user;
+          bestScore = score;
+          bestUser = user;
         }
+      }
     }
 
-    currentMatch = bestUser
-        ? { user: bestUser, score: bestScore }
-        : null;
+    appState.currentMatch = bestUser
+      ? { user: bestUser, score: bestScore }
+      : null;
 
-    showRecognition(bestUser, bestScore);
+    updateRecognitionBanner(bestUser, bestScore);
 
-    if (
-        $("autoScan").checked &&
+    if (appState.autoAttendance &&
         bestUser &&
-        bestScore >= Number($("threshold").value)
-    ) {
-        const now = Date.now();
-        const previous = lastAuto[bestUser.id] || 0;
-
-        if (now - previous > 15000) {
-            lastAuto[bestUser.id] = now;
-            recordAttendance(true);
-        }
-    }
-}
-
-function showRecognition(user, score) {
-    if (!user) {
-        $("recognition").innerHTML =
-            '<p class="text-slate-400">Belum ada wajah dikenali</p>';
-        return;
+        bestScore >= appState.similarityThreshold) {
+      recordAttendance(true);
     }
 
-    const matched = score >= Number($("threshold").value);
+  } else {
+    appState.currentLandmarks = null;
+    appState.currentMatch = null;
 
-    $("recognition").innerHTML = `
-        <h3 class="font-bold text-lg ${matched ? "text-emerald-400" : "text-rose-400"}">
-            ${matched ? "Wajah Cocok" : "Wajah Belum Cocok"}
-        </h3>
-        <p>${escapeHTML(user.name)}</p>
-        <p class="text-sm text-slate-400">${escapeHTML(user.nik)}</p>
-        <p class="font-bold text-xl mt-2">${score.toFixed(1)}%</p>
-    `;
+    $("faceStatusDot").className = "w-2 h-2 rounded-full bg-amber-500";
+    $("faceStatusText").textContent = "Wajah Tidak Terdeteksi";
+    $("landmarkCount").textContent = "0";
+
+    updateRecognitionBanner(null, 0);
+  }
+
+  canvasCtx.restore();
+
+  if (!$("cameraOverlay").classList.contains("hidden")) {
+    $("cameraOverlay").classList.add("hidden");
+  }
 }
 
-function escapeHTML(value) {
-    return String(value ?? "").replace(/[&<>"']/g, c => ({
-        "&":"&amp;",
-        "<":"&lt;",
-        ">":"&gt;",
-        '"':"&quot;",
-        "'":"&#39;"
-    })[c]);
-}
-
-/* =====================================
-   8. PRESENSI
-===================================== */
-
-async function recordAttendance(isAuto = false) {
-    if (saving) return;
-
-    if (!currentLandmarks || !currentMatch) {
-        if (!isAuto) toast("Wajah belum dikenali.");
-        return;
-    }
-
-    const { user, score } = currentMatch;
-
-    if (score < Number($("threshold").value)) {
-        if (!isAuto) toast("Skor kemiripan belum memenuhi batas.");
-        return;
-    }
-
-    saving = true;
-    $("attendBtn").disabled = true;
-
-    try {
-        const now = new Date();
-
-        await addLog({
-            userId: Number(user.id),
-            name: user.name,
-            nik: user.nik,
-            division: user.division,
-            type: attendanceType,
-            similarity: Number(score.toFixed(1)),
-            timestamp: now.toISOString(),
-            dateStr: [
-                now.getFullYear(),
-                String(now.getMonth()+1).padStart(2,"0"),
-                String(now.getDate()).padStart(2,"0")
-            ].join("-"),
-            timeStr: [
-                String(now.getHours()).padStart(2,"0"),
-                String(now.getMinutes()).padStart(2,"0"),
-                String(now.getSeconds()).padStart(2,"0")
-            ].join(":"),
-            photo: capturePhoto()
-        });
-
-        toast(
-            "Presensi " + attendanceType +
-            " berhasil untuk " + user.name
-        );
-
-        await refreshAllData();
-
-    } catch (error) {
-        console.error(error);
-
-        if (!isAuto) {
-            toast("Gagal menyimpan presensi: " + error.message);
-        }
-    } finally {
-        saving = false;
-        $("attendBtn").disabled = false;
-    }
-}
-
-/* =====================================
-   9. TAMPILAN DATA
-===================================== */
-
-async function refreshAllData() {
-    const [u, l] = await Promise.all([
-        getUsers(),
-        getLogs()
-    ]);
-
-    users = u.map(user => ({
-        ...user,
-        embedding: typeof user.embedding === "string"
-            ? JSON.parse(user.embedding)
-            : user.embedding
-    }));
-
-    logs = l.sort(
-        (a,b) => new Date(b.timestamp) - new Date(a.timestamp)
-    );
-
-    renderUsers();
-    renderLogs();
-
-    $("totalUsers").textContent = users.length;
-    $("totalLogs").textContent = logs.length;
-
-    const today = new Date().toLocaleDateString("en-CA");
-
-    $("todayLogs").textContent =
-        logs.filter(x => x.dateStr === today).length;
-
-}
-
-function renderUsers() {
-    $("usersBody").innerHTML = users.map(user => `
-        <tr class="border-b border-slate-800">
-            <td class="p-3">${escapeHTML(user.name)}</td>
-            <td class="p-3">${escapeHTML(user.nik)}</td>
-            <td class="p-3">${escapeHTML(user.division)}</td>
-            <td class="p-3">
-                <button class="text-rose-400"
-                    data-delete="${escapeHTML(user.id)}">
-                    Hapus
-                </button>
-            </td>
-        </tr>
-    `).join("");
-
-    document.querySelectorAll("[data-delete]").forEach(btn => {
-        btn.onclick = async () => {
-            if (!confirm("Hapus pengguna ini?")) return;
-
-            try {
-                await deleteUser(btn.dataset.delete);
-                toast("Pengguna berhasil dihapus.");
-                await refreshAllData();
-            } catch(error) {
-                toast("Gagal menghapus: " + error.message);
-            }
-        };
-    });
-}
-
-function renderLogs() {
-    $("logsBody").innerHTML = logs.map(log => `
-        <tr class="border-b border-slate-800">
-            <td class="p-3">${escapeHTML(log.name)}</td>
-            <td class="p-3">${escapeHTML(log.nik)}</td>
-            <td class="p-3">${escapeHTML(log.dateStr)}</td>
-            <td class="p-3">${escapeHTML(log.timeStr)}</td>
-            <td class="p-3">${escapeHTML(log.type)}</td>
-            <td class="p-3">${Number(log.similarity).toFixed(1)}%</td>
-        </tr>
-    `).join("");
-}
-
-/* =====================================
-   10. EXPORT CSV
-===================================== */
-
-function exportCSV() {
-    if (!logs.length) {
-        toast("Belum ada riwayat.");
-        return;
-    }
-
-    const headers = [
-        "Nama","NIK","Divisi","Tanggal",
-        "Waktu","Status","Kemiripan"
-    ];
-
-    const rows = logs.map(l => [
-        l.name,l.nik,l.division,
-        l.dateStr,l.timeStr,l.type,l.similarity
-    ]);
-
-    const csv = [headers,...rows]
-        .map(row => row.map(v =>
-            '"' + String(v ?? "").replace(/"/g,'""') + '"'
-        ).join(","))
-        .join("\n");
-
-    const blob = new Blob(
-        ["\uFEFF" + csv],
-        {type:"text/csv;charset=utf-8"}
-    );
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-
-    a.href = url;
-    a.download = "riwayat-presensi.csv";
-    a.click();
-
-    URL.revokeObjectURL(url);
-}
-
-/* =====================================
-   11. MEDIAPIPE
-===================================== */
-
-async function startCamera() {
-    if (cameraStarting) return;
-    cameraStarting = true;
-
-    try {
-        if (!window.FaceMesh || !window.Camera) {
-            throw new Error("Library MediaPipe gagal dimuat.");
-        }
-
-        if (!faceMesh) {
-            faceMesh = new FaceMesh({
-                locateFile: file =>
-                    "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/" + file
-            });
-
-            faceMesh.setOptions({
-                maxNumFaces:1,
-                refineLandmarks:false,
-                minDetectionConfidence:0.55,
-                minTrackingConfidence:0.55
-            });
-
-            faceMesh.onResults(onResults);
-        }
-
-        if (camera) {
-            try { await camera.stop(); } catch {}
-        }
-
-        camera = new Camera($("video"), {
-            onFrame: async () => {
-                if ($("video").readyState >= 2) {
-                    await faceMesh.send({
-                        image:$("video")
-                    });
-                }
-            },
-            width:640,
-            height:480
-        });
-
-        await camera.start();
-        toast("Kamera berhasil diaktifkan.");
-
-    } catch(error) {
-        console.error(error);
-        toast("Kamera gagal: " + error.message);
-    } finally {
-        cameraStarting = false;
-    }
-}
-
-function onResults(results) {
-    const canvas = $("canvas");
-    const ctx = canvas.getContext("2d");
-
-    const width = canvas.width =
-        $("video").videoWidth || 640;
-
-    const height = canvas.height =
-        $("video").videoHeight || 480;
-
-    ctx.clearRect(0,0,width,height);
-    ctx.save();
-
-    ctx.translate(width,0);
-    ctx.scale(-1,1);
-
-    ctx.drawImage(results.image,0,0,width,height);
-
-    if (
-        results.multiFaceLandmarks &&
-        results.multiFaceLandmarks.length
-    ) {
-        const points = results.multiFaceLandmarks[0];
-
-        currentLandmarks = points;
-
-        $("faceStatus").textContent = "Wajah terdeteksi";
-        $("pointCount").textContent = points.length + "/468";
-
-        ctx.fillStyle = "#10b981";
-
-        for (const point of points) {
-            ctx.beginPath();
-            ctx.arc(
-                point.x*width,
-                point.y*height,
-                1.5,0,Math.PI*2
-            );
-            ctx.fill();
-        }
-
-        recognizeFace(points);
-
-    } else {
-        currentLandmarks = null;
-        currentMatch = null;
-
-        $("faceStatus").textContent = "Mencari wajah...";
-        $("pointCount").textContent = "0/468";
-
-        showRecognition(null,0);
-    }
-
-    ctx.restore();
-}
-
-/* =====================================
-   12. EVENT LISTENERS
-===================================== */
-
-document.querySelectorAll(".tab").forEach(btn => {
-    btn.onclick = () => {
-        document.querySelectorAll(".tab").forEach(b =>
-            b.classList.remove("active")
-        );
-
-        btn.classList.add("active");
-
-        document.querySelectorAll(".tab-content").forEach(section =>
-            section.classList.add("hidden")
-        );
-
-        $(btn.dataset.tab).classList.remove("hidden");
-    };
-});
-
-$("registerBtn").onclick = registerUser;
-
-$("attendBtn").onclick = () => recordAttendance(false);
-
-$("masukBtn").onclick = () => {
-    attendanceType = "MASUK";
-    toast("Mode presensi masuk dipilih.");
-};
-
-$("pulangBtn").onclick = () => {
-    attendanceType = "PULANG";
-    toast("Mode presensi pulang dipilih.");
-};
-
-$("retryCamera").onclick = startCamera;
-
-$("refreshBtn").onclick = async () => {
-    try {
-        await refreshAllData();
-        toast("Data berhasil diperbarui.");
-    } catch(error) {
-        toast(error.message);
-    }
-};
-
-$("exportBtn").onclick = exportCSV;
-
-$("clearLogsBtn").onclick = async () => {
-    if (!confirm("Hapus semua riwayat presensi?")) return;
-
-    try {
-        await clearLogs();
-        toast("Riwayat berhasil dihapus.");
-        await refreshAllData();
-    } catch(error) {
-        toast(error.message);
-    }
-};
-
-   let camera = null;
-let faceMesh = null;
+// =====================================================
+// 13. INISIALISASI KAMERA
+// =====================================================
 
 async function startFaceMeshCamera() {
-    const overlay = document.getElementById('cameraOverlay');
-    const spinner = document.getElementById('cameraSpinner');
-    const retryBtn = document.getElementById('retryCameraBtn');
-    const title = document.getElementById('overlayTitle');
-    const desc = document.getElementById('overlayDesc');
+  if (cameraStarting) return;
+  cameraStarting = true;
 
-    try {
-        spinner.classList.remove('hidden');
-        retryBtn.classList.add('hidden');
-        overlay.classList.remove('opacity-0', 'pointer-events-none');
+  const overlay = $("cameraOverlay");
+  const spinner = $("cameraSpinner");
+  const retry = $("retryCameraBtn");
 
-        title.textContent = 'Mengaktifkan Kamera...';
-        desc.textContent = 'Memuat model pengenalan wajah 468 titik.';
+  overlay.classList.remove("hidden");
+  spinner.classList.remove("hidden");
+  retry.classList.add("hidden");
 
-        // Periksa dukungan kamera
-        if (!navigator.mediaDevices ||
-            !navigator.mediaDevices.getUserMedia) {
-            throw new Error(
-                'Browser tidak mendukung kamera. Buka website melalui HTTPS.'
-            );
-        }
+  $("overlayTitle").textContent = "Mengaktifkan Kamera...";
+  $("overlayDesc").textContent = "Memuat MediaPipe Face Mesh.";
 
-        // Periksa library MediaPipe
-        if (typeof FaceMesh === 'undefined') {
-            throw new Error('Library FaceMesh gagal dimuat.');
-        }
-
-        if (typeof Camera === 'undefined') {
-            throw new Error('Library Camera Utils gagal dimuat.');
-        }
-
-        // Inisialisasi FaceMesh
-        faceMesh = new FaceMesh({
-            locateFile: (file) =>
-                https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}
-        });
-
-        faceMesh.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: false,
-            minDetectionConfidence: 0.55,
-            minTrackingConfidence: 0.55
-        });
-
-        faceMesh.onResults(onFaceMeshResults);
-
-        // Inisialisasi kamera
-        camera = new Camera(videoElement, {
-            onFrame: async () => {
-                if (videoElement.readyState >= 2) {
-                    await faceMesh.send({
-                        image: videoElement
-                    });
-                }
-            },
-            width: 640,
-            height: 480
-        });
-
-        await camera.start();
-
-        title.textContent = 'Kamera Aktif';
-        desc.textContent = 'Arahkan wajah ke kamera.';
-
-    } catch (err) {
-        console.error('Camera Error:', err);
-
-        spinner.classList.add('hidden');
-        retryBtn.classList.remove('hidden');
-
-        title.textContent = 'Kamera Tidak Dapat Dibuka';
-        desc.textContent = err.message ||
-            'Periksa izin kamera dan koneksi internet.';
-
-        overlay.classList.remove(
-            'opacity-0',
-            'pointer-events-none'
-        );
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Browser tidak mendukung kamera atau halaman tidak menggunakan HTTPS.");
     }
+
+    // Hentikan kamera lama jika tombol coba hubungkan ditekan kembali.
+    cameraRunning = false;
+
+    if (cameraAnimationId) {
+      cancelAnimationFrame(cameraAnimationId);
+      cameraAnimationId = null;
+    }
+
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+    }
+
+    if (!faceMesh) {
+      if (typeof FaceMesh === "undefined") {
+        throw new Error("Library MediaPipe gagal dimuat. Periksa koneksi internet/CDN.");
+      }
+
+      faceMesh = new FaceMesh({
+        locateFile: file =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: false,
+        minDetectionConfidence: 0.55,
+        minTrackingConfidence: 0.55
+      });
+
+      faceMesh.onResults(onFaceMeshResults);
+    }
+
+    // Minta akses kamera.
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      }
+    });
+
+    videoElement.srcObject = cameraStream;
+
+    await new Promise((resolve, reject) => {
+      if (videoElement.readyState >= 2) {
+        resolve();
+        return;
+      }
+
+      videoElement.onloadedmetadata = resolve;
+      videoElement.onerror = () => reject(new Error("Video kamera gagal dimuat."));
+    });
+
+    await videoElement.play();
+
+    resizeCanvas();
+
+    cameraRunning = true;
+    $("cameraStatus").textContent = "● Kamera aktif";
+    $("cameraStatus").className = "text-xs text-emerald-400";
+
+    spinner.classList.add("hidden");
+    $("overlayTitle").textContent = "Kamera Aktif";
+    $("overlayDesc").textContent = "Posisikan wajah di tengah kamera.";
+
+    overlay.classList.add("hidden");
+
+    // Loop MediaPipe tidak dijalankan bersamaan.
+    async function processFrame() {
+      if (!cameraRunning) return;
+
+      if (!cameraLoopBusy &&
+          videoElement.readyState >= 2 &&
+          videoElement.videoWidth > 0) {
+        cameraLoopBusy = true;
+
+        try {
+          await faceMesh.send({ image: videoElement });
+        } catch (error) {
+          console.error("FaceMesh frame error:", error);
+        } finally {
+          cameraLoopBusy = false;
+        }
+      }
+
+      if (cameraRunning) {
+        cameraAnimationId = requestAnimationFrame(processFrame);
+      }
+    }
+
+    cameraAnimationId = requestAnimationFrame(processFrame);
+
+  } catch (error) {
+    console.error("Camera initialization:", error);
+
+    cameraRunning = false;
+
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+    }
+
+    spinner.classList.add("hidden");
+    retry.classList.remove("hidden");
+
+    $("cameraStatus").textContent = "● Kamera gagal";
+    $("cameraStatus").className = "text-xs text-rose-400";
+
+    $("overlayTitle").textContent = "Kamera Tidak Dapat Diakses";
+    $("overlayDesc").textContent = error.message;
+
+    overlay.classList.remove("hidden");
+
+    showToast("Kamera Gagal", error.message, "error");
+
+  } finally {
+    cameraStarting = false;
+  }
 }
 
-/* =====================================
-   13. JAM
-===================================== */
+// =====================================================
+// 14. EXPORT CSV
+// =====================================================
+
+function exportLogsToCSV() {
+  const filter = $("filterDateInput").value;
+
+  const logs = filter
+    ? appState.logs.filter(x => x.dateStr === filter)
+    : appState.logs;
+
+  if (!logs.length) {
+    showToast("Data Kosong", "Tidak ada riwayat untuk diekspor.", "error");
+    return;
+  }
+
+  const headers = [
+    "ID", "Nama", "NIK", "Divisi",
+    "Tanggal", "Waktu", "Status", "Kemiripan"
+  ];
+
+  const csvEscape = value =>
+    `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+  const rows = logs.map(log => [
+    log.id,
+    log.name,
+    log.nik,
+    log.division,
+    log.dateStr,
+    log.timeStr,
+    log.type,
+    log.similarity
+  ]);
+
+  const csv = "\uFEFF" + [
+    headers.map(csvEscape).join(","),
+    ...rows.map(row => row.map(csvEscape).join(","))
+  ].join("\r\n");
+
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8;"
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `faceattend_${localDateTime().dateStr}.csv`;
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  URL.revokeObjectURL(url);
+
+  showToast("Export Berhasil", "File CSV berhasil dibuat.");
+}
+
+// =====================================================
+// 15. EVENT LISTENERS
+// =====================================================
+
+function setupEventListeners() {
+  // Navigasi
+  document.querySelectorAll(".tab-btn").forEach(button => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.tab;
+
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.classList.remove("bg-emerald-600", "text-white");
+        btn.classList.add("text-slate-400");
+      });
+
+      button.classList.add("bg-emerald-600", "text-white");
+      button.classList.remove("text-slate-400");
+
+      document.querySelectorAll(".tab-content").forEach(section => {
+        section.classList.add("hidden");
+      });
+
+      $(`tab-${target}`).classList.remove("hidden");
+
+      if (target === "camera") resizeCanvas();
+    });
+  });
+
+  // Jenis presensi
+  document.querySelectorAll(".attendance-type-btn").forEach(button => {
+    button.addEventListener("click", () => {
+      appState.attendanceType = button.dataset.type;
+
+      document.querySelectorAll(".attendance-type-btn").forEach(btn => {
+        btn.className = "attendance-type-btn py-3 rounded-xl border border-slate-800 bg-slate-950 text-xs font-bold";
+      });
+
+      button.className = appState.attendanceType === "MASUK"
+        ? "attendance-type-btn py-3 rounded-xl border border-emerald-500 bg-emerald-500/15 text-emerald-400 text-xs font-bold"
+        : "attendance-type-btn py-3 rounded-xl border border-sky-500 bg-sky-500/15 text-sky-400 text-xs font-bold";
+    });
+  });
+
+  $("manualAttendBtn").addEventListener("click", () => recordAttendance(false));
+
+  $("registerForm").addEventListener("submit", registerUser);
+
+  $("retryCameraBtn").addEventListener("click", startFaceMeshCamera);
+
+  // Slider
+  $("thresholdSlider").addEventListener("input", event => {
+    appState.similarityThreshold = Number(event.target.value);
+    $("thresholdVal").textContent = `${appState.similarityThreshold}%`;
+
+    if (appState.currentMatch) {
+      updateRecognitionBanner(
+        appState.currentMatch.user,
+        appState.currentMatch.score
+      );
+    }
+  });
+
+  $("dotSizeSlider").addEventListener("input", event => {
+    appState.dotSize = Number(event.target.value);
+    $("dotSizeVal").textContent = `${appState.dotSize.toFixed(1)} px`;
+  });
+
+  $("dotColorPicker").addEventListener("input", event => {
+    appState.dotColor = event.target.value;
+  });
+
+  $("showDotsToggle").addEventListener("change", event => {
+    appState.showDots = event.target.checked;
+  });
+
+  $("showVideoToggle").addEventListener("change", event => {
+    appState.showVideo = event.target.checked;
+  });
+
+  $("autoAttendanceToggle").addEventListener("change", event => {
+    appState.autoAttendance = event.target.checked;
+
+    showToast(
+      appState.autoAttendance ? "Auto-Scan Aktif" : "Auto-Scan Nonaktif",
+      appState.autoAttendance
+        ? "Sistem akan mencatat wajah yang cocok."
+        : "Gunakan tombol presensi manual.",
+      "info"
+    );
+  });
+
+  // Pencarian
+  $("searchUserInput").addEventListener("input", renderUsersGrid);
+
+  $("filterDateInput").addEventListener("change", renderLogsTable);
+
+  $("clearDateFilterBtn").addEventListener("click", () => {
+    $("filterDateInput").value = "";
+    renderLogsTable();
+  });
+
+  // Export
+  $("exportCsvBtn").addEventListener("click", exportLogsToCSV);
+
+  // Hapus riwayat
+  $("resetLogsBtn").addEventListener("click", async () => {
+    const ok = await showConfirmModal(
+      "Hapus Semua Riwayat?",
+      "Semua riwayat presensi di Cloudflare D1 akan dihapus permanen."
+    );
+
+    if (!ok) return;
+
+    try {
+      await apiRequest("/api/attendance", { method: "DELETE" });
+      await refreshAllData();
+      showToast("Berhasil", "Seluruh riwayat presensi telah dihapus.");
+    } catch (error) {
+      showToast("Gagal", error.message, "error");
+    }
+  });
+
+  // Reset database
+  $("resetAllDbBtn").addEventListener("click", async () => {
+    const ok = await showConfirmModal(
+      "Reset Seluruh Database?",
+      "Semua pengguna dan riwayat presensi akan dihapus permanen dari D1."
+    );
+
+    if (!ok) return;
+
+    try {
+      await apiRequest("/api/database/reset", { method: "DELETE" });
+
+      appState.lastAutoAttendMap = {};
+      appState.currentMatch = null;
+
+      await refreshAllData();
+
+      showToast("Database Direset", "Semua data telah dihapus.");
+    } catch (error) {
+      showToast("Gagal Reset", error.message, "error");
+    }
+  });
+}
+
+// =====================================================
+// 16. JAM DIGITAL
+// =====================================================
 
 function updateClock() {
-    const now = new Date();
+  const now = new Date();
 
-    $("clock").textContent =
-        now.toLocaleTimeString("id-ID");
+  $("liveTime").textContent = now.toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
+    hour12: false
+  });
 
-    $("date").textContent =
-        now.toLocaleDateString("id-ID", {
-            weekday:"long",
-            day:"numeric",
-            month:"long",
-            year:"numeric"
-        });
+  $("liveDate").textContent = now.toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
 }
 
-setInterval(updateClock,1000);
-updateClock();
+// =====================================================
+// 17. BOOTSTRAP APLIKASI
+// =====================================================
 
+async function initializeApp() {
+  setupEventListeners();
+  resizeCanvas();
+  updateClock();
+  setInterval(updateClock, 1000);
 
-   
+  // Backend dan kamera tidak saling menghalangi.
+  const backendReady = await checkBackend();
 
-/* =====================================
-   14. MULAI APLIKASI
-===================================== */
-
-async function startApp() {
+  if (backendReady) {
     try {
-        await initDB();
-        await refreshAllData();
-
-        $("backendStatus").textContent =
-            "🟢 Backend dan database berhasil terhubung.";
-
-    } catch(error) {
-        console.error(error);
-
-        $("backendStatus").textContent =
-            "🔴 Backend gagal: " + error.message;
-
-        toast(error.message);
+      await refreshAllData();
+    } catch (error) {
+      console.error("Load D1:", error);
+      showToast("Gagal Memuat Data", error.message, "error");
     }
+  }
 
-    await startCamera();
+  // Kamera tetap dicoba meskipun backend gagal.
+  await startFaceMeshCamera();
 }
 
-window.addEventListener("load",startApp);
+window.addEventListener("DOMContentLoaded", initializeApp);
 
+// Hentikan kamera saat halaman ditinggalkan.
+window.addEventListener("beforeunload", () => {
+  cameraRunning = false;
+
+  if (cameraAnimationId) {
+    cancelAnimationFrame(cameraAnimationId);
+  }
+
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+  }
+});
 </script>
+
 </body>
 </html>
